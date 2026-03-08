@@ -7,12 +7,14 @@ library(lubridate)
 # Swapped the standard CPI table for the Core Inflation table (18-10-0256-01)
 macro_metadata <- tribble(
   ~category,               ~table_id,       ~native_freq, ~headline_vector,
-  "net_savings", "36-10-0111-01", "quarterly", "v62305783",  # Net saving
-  "gross_domestic_income", "36-10-0105-01", "quarterly", "v62305752",  # Gross domestic income
-  "household_consumption", "36-10-0107-01", "quarterly", "v62305732",  # Household final consumption expenditure
+  "national_net_savings", "36-10-0111-01", "quarterly", "v62305875",  # National net saving
+  "household_net_savings", "36-10-0112-01", "quarterly", "v62305983",  # Household net saving
+  "corporate_net_savings", "36-10-0116-01", "quarterly", "v62306972",  # Corporate net saving
+  "gross_domestic_income", "36-10-0105-01", "quarterly", "v61992652",  # Gross domestic income
+  "household_consumption", "36-10-0107-01", "quarterly", "v61989012",  # Household final consumption expenditure
   "unemployment_rate", "14-10-0287-03", "monthly", "v2062815",   # Unemployment rate, 15+, Both sexes
-  "cpi_trim_yoy", "18-10-0256-01", "monthly", "v108785715", # CPI-trim (Y/Y % change)
-  "market_interest_rates", "10-10-0139-01", "daily", "v122530"     # Bank rate
+  "cpi_inflation_indicator", "18-10-0004-13", "monthly", "v41690973", # CPI Inflation Indicator
+  "market_interest_rates", "10-10-0139-01", "daily", "v39078"     # Bank rate
 )
 
 #=== 2. Data wrangling and harmonization ===
@@ -83,4 +85,5 @@ macro_panel_wide <- macro_panel_long |>
 glimpse(macro_panel_wide)
 
 #=== 4. Save harmonized data ===
-write.csv(macro_panel_wide, "macro_panel_wide_raw.csv", row.names = FALSE)
+write.csv(macro_panel_wide, "../data/macro_panel_wide_raw.csv", row.names = FALSE)
+
