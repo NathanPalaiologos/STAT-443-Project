@@ -1,0 +1,22 @@
+---
+title: "EDA"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+# Load the necessary libraries
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(knitr)
+```
+### Load the Harmonized Data
+```{r data loading, include=TRUE}
+# Load the harmonized data
+macro_df <- read_csv("../data/macro_panel_wide_raw.csv")|>
+  drop_na()|>
+  glimpse()
+```
+```{r}
+raw_ts <- ts(macro_df, start = c(1977,1), end = c(2025, 10), frequency = 4)
+```
