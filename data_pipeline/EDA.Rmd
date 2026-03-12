@@ -1,22 +1,297 @@
 ---
 title: "EDA"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
-```{r setup, include=TRUE}
-# Load the necessary libraries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(tidyverse)
 library(lubridate)
 library(forecast)
 library(knitr)
+library(tseries)
 ```
 ### Load the Harmonized Data
 ```{r data loading, include=TRUE}
-# Load the harmonized data
-macro_df <- read_csv("../data/macro_panel_wide_raw.csv")|>
-  drop_na()|>
-  glimpse()
+macro_df <- read_csv("../data/macro_panel_wide_raw.csv", show_col_types = FALSE) |>
+  mutate(quarterly_date = as.Date(quarterly_date)) |>
+  arrange(quarterly_date)
+
+glimpse(macro_df)
+summary(macro_df)
 ```
-```{r}
-raw_ts <- ts(macro_df, start = c(1977,1), end = c(2025, 10), frequency = 4)
+
+```{r checking missing}
+na_summary <- macro_df |>
+  summarise(across(-quarterly_date, ~ sum(is.na(.)))) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "series",
+    values_to = "n_missing"
+  ) |>
+  arrange(desc(n_missing))
+
+na_summary
+```
+
+```{r Plot all series}
+macro_long <- macro_df |>
+  pivot_longer(
+    cols = -quarterly_date,
+    names_to = "series",
+    values_to = "value"
+  )
+
+ggplot(macro_long, aes(x = quarterly_date, y = value)) +
+  geom_line() +
+  facet_wrap(~ series, scales = "free_y", ncol = 2) +
+  theme_minimal() +
+  labs(
+    title = "All macro series over time",
+    x = "Quarter",
+    y = "Value"
+  )
+```
+
+```{r EDA dataset}
+eda_df <- macro_df |>
+  select(
+    quarterly_date,
+    national_net_savings,
+    household_net_savings,
+    corporate_net_savings,
+    gross_domestic_income,
+    household_consumption,
+    unemployment_rate,
+    cpi_inflation_indicator,
+    market_interest_rates
+  ) |>
+  rename(
+    date = quarterly_date,
+    nat_save = national_net_savings,
+    hh_save = household_net_savings,
+    corp_save = corporate_net_savings,
+    gdi = gross_domestic_income,
+    cons = household_consumption,
+    unemp = unemployment_rate,
+    cpi = cpi_inflation_indicator,
+    rate = market_interest_rates
+  ) |>
+  arrange(date)
+
+glimpse(eda_df)
+summary(eda_df)
+
+```
+
+```{r Compare the three net savings series}
+savings_long <- eda_df |>
+  select(date, nat_save, hh_save, corp_save) |>
+  pivot_longer(
+    cols = -date,
+    names_to = "series",
+    values_to = "value"
+  )
+
+ggplot(savings_long, aes(x = date, y = value, color = series)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  labs(
+    title = "National, household, and corporate net savings",
+    x = "Quarter",
+    y = "Net savings",
+    color = "Series"
+  )
+```
+
+```{r Focus on household and corporate net savings}
+main_response_long <- eda_df |>
+  select(date, hh_save, corp_save) |>
+  pivot_longer(
+    cols = -date,
+    names_to = "series",
+    values_to = "value"
+  )
+
+ggplot(main_response_long, aes(x = date, y = value)) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ series, scales = "free_y", ncol = 1) +
+  theme_minimal() +
+  labs(
+    title = "Main response series",
+    x = "Quarter",
+    y = "Net savings"
+  )
+```
+
+```{r Focused GDI EDA}
+eda_df <- eda_df |>
+  mutate(
+    gdi_qoq = 100 * (gdi / lag(gdi) - 1),
+    gdi_yoy = 100 * (gdi / lag(gdi, 4) - 1),
+    lgdi = log(gdi),
+    lgdi_yoy = 100 * (lgdi - lag(lgdi, 4))
+  )
+
+summary(select(eda_df, gdi, gdi_qoq, gdi_yoy, lgdi_yoy))
+```
+
+```{r GDI EDA}
+p1 <- ggplot(eda_df, aes(x = date, y = gdi)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Gross domestic income",
+    x = "Quarter",
+    y = "GDI"
+  )
+
+p2 <- ggplot(eda_df, aes(x = date, y = gdi_yoy)) +
+  geom_line(linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "GDI year-over-year change (%)",
+    x = "Quarter",
+    y = "YoY % change"
+  )
+
+p1
+p2
+```
+
+```{r Simple transformations for the main outcome series}
+eda_df <- eda_df |>
+  mutate(
+    hh_diff = hh_save - lag(hh_save),
+    corp_diff = corp_save - lag(corp_save),
+    nat_diff = nat_save - lag(nat_save),
+    unemp_diff = unemp - lag(unemp),
+    rate_diff = rate - lag(rate),
+    cons_yoy = 100 * (cons / lag(cons, 4) - 1),
+    cpi_yoy = 100 * (cpi / lag(cpi, 4) - 1)
+  )
+
+summary(select(
+  eda_df,
+  hh_diff,
+  corp_diff,
+  nat_diff,
+  unemp_diff,
+  rate_diff,
+  cons_yoy,
+  cpi_yoy
+))
+```
+
+```{r Plot transformed household and corporate series}
+transformed_long <- eda_df |>
+  select(date, hh_diff, corp_diff) |>
+  pivot_longer(
+    cols = -date,
+    names_to = "series",
+    values_to = "value"
+  )
+
+ggplot(transformed_long, aes(x = date, y = value)) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ series, scales = "free_y", ncol = 1) +
+  theme_minimal() +
+  labs(
+    title = "First differences of household and corporate net savings",
+    x = "Quarter",
+    y = "First difference"
+  )
+```
+
+```{r Time-series diagnostics for household net savings}
+hh_ts <- ts(
+  eda_df$hh_save,
+  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+  frequency = 4
+)
+
+dhh_ts <- diff(hh_ts)
+
+par(mfrow = c(2, 2))
+plot(hh_ts, main = "Household net savings")
+plot(dhh_ts, main = "First difference: household net savings")
+acf(na.omit(dhh_ts), lag.max = 20, main = "ACF: diff household savings")
+pacf(na.omit(dhh_ts), lag.max = 20, main = "PACF: diff household savings")
+par(mfrow = c(1, 1))
+
+adf.test(na.omit(dhh_ts))
+```
+
+```{r Time-series diagnostics for corporate net savings}
+corp_ts <- ts(
+  eda_df$corp_save,
+  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+  frequency = 4
+)
+
+dcorp_ts <- diff(corp_ts)
+
+par(mfrow = c(2, 2))
+plot(corp_ts, main = "Corporate net savings")
+plot(dcorp_ts, main = "First difference: corporate net savings")
+acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate savings")
+pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate savings")
+par(mfrow = c(1, 1))
+
+adf.test(na.omit(dcorp_ts))
+```
+
+
+```{r Benchmark diagnostics for national net savings}
+nat_ts <- ts(
+  eda_df$nat_save,
+  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+  frequency = 4
+)
+
+dnat_ts <- diff(nat_ts)
+
+par(mfrow = c(2, 2))
+plot(nat_ts, main = "National net savings")
+plot(dnat_ts, main = "First difference: national net savings")
+acf(na.omit(dnat_ts), lag.max = 20, main = "ACF: diff national savings")
+pacf(na.omit(dnat_ts), lag.max = 20, main = "PACF: diff national savings")
+par(mfrow = c(1, 1))
+
+adf.test(na.omit(dnat_ts))
+```
+
+
+```{r Lead-lag checks with GDI, unemployment, and interest rates}
+par(mfrow = c(2, 3))
+
+ccf(na.omit(eda_df$gdi), na.omit(eda_df$hh_save),
+    main = "GDI vs household savings")
+ccf(na.omit(eda_df$gdi), na.omit(eda_df$corp_save),
+    main = "GDI vs corporate savings")
+
+ccf(na.omit(eda_df$unemp), na.omit(eda_df$hh_save),
+    main = "Unemployment vs household savings")
+ccf(na.omit(eda_df$unemp), na.omit(eda_df$corp_save),
+    main = "Unemployment vs corporate savings")
+
+ccf(na.omit(eda_df$rate), na.omit(eda_df$hh_save),
+    main = "Interest rate vs household savings")
+ccf(na.omit(eda_df$rate), na.omit(eda_df$corp_save),
+    main = "Interest rate vs corporate savings")
+
+par(mfrow = c(1, 1))
+```
+
+
+```{r Simple scatterplot matrix}
+pairs(
+  eda_df |>
+    select(hh_save, corp_save, gdi, cons, unemp, cpi, rate) |>
+    na.omit(),
+  main = "Scatterplot matrix for key variables"
+)
 ```
