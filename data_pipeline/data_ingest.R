@@ -7,14 +7,17 @@ library(lubridate)
 # Swapped the standard CPI table for the Core Inflation table (18-10-0256-01)
 macro_metadata <- tribble(
   ~category,               ~table_id,       ~native_freq, ~headline_vector,
-  "national_net_savings", "36-10-0111-01", "quarterly", "v62305875",  # National net saving
-  "household_net_savings", "36-10-0112-01", "quarterly", "v62305983",  # Household net saving
-  "corporate_net_savings", "36-10-0116-01", "quarterly", "v62306972",  # Corporate net saving
-  "gross_domestic_income", "36-10-0105-01", "quarterly", "v61992652",  # Gross domestic income
+  "population", "17-10-0009-01", "quarterly", "v1",  # Population Estimates 
+  "national_net_savings", "36-10-0111-01", "quarterly", "v62305875",  # National net saving (Millions of CAD)
+  "household_net_savings", "36-10-0112-01", "quarterly", "v62305983",  # Household net saving (Millions of CAD)
+  "corporate_net_savings", "36-10-0116-01", "quarterly", "v62306972",  # Corporate net saving (Millions of CAD)
+  "gross_fixed_capital", "36-10-0104-01", "quarterly", "v62305733", # Gross fixed capital formation (Millions of CAD)
+  "business_investment_inventories", "36-10-0104-01", "quarterly", "v62305742", # Business investment (Millions of CAD)"
+  "gross_domestic_income", "36-10-0122-01", "quarterly", "v62468841",  # Gross domestic income (Millions of CAD)
   "household_consumption", "36-10-0107-01", "quarterly", "v61989012",  # Household final consumption expenditure
-  "unemployment_rate", "14-10-0287-03", "monthly", "v2062815",   # Unemployment rate, 15+, Both sexes
-  "cpi_inflation_indicator", "18-10-0004-13", "monthly", "v41690973", # CPI Inflation Indicator
-  "market_interest_rates", "10-10-0139-01", "daily", "v39078"     # Bank rate
+  "unemployment_rate", "14-10-0287-03", "monthly", "v2062815",   # Unemployment rate, 15+, Both sexes (Percentage)
+  "cpi_inflation_indicator", "18-10-0004-13", "monthly", "v41690973", # CPI Inflation Indicator (Index, 2002=100)
+  "market_interest_rates", "10-10-0139-01", "daily", "v39078"     # Bank rate (Percentage)
 )
 
 #=== 2. Data wrangling and harmonization ===
@@ -79,11 +82,13 @@ macro_panel_wide <- macro_panel_long |>
     names_from = category, 
     values_from = value
   ) |>
+  mutate(gross_private_domestic_investment = gross_fixed_capital + business_investment_inventories) |>
+  select(-gross_fixed_capital, -business_investment_inventories) |>
   mutate(quarterly_date = as.Date(quarterly_date)) |>
   arrange(quarterly_date)
 
 glimpse(macro_panel_wide)
 
 #=== 4. Save harmonized data ===
-write.csv(macro_panel_wide, "../data/macro_panel_wide_raw.csv", row.names = FALSE)
+write.csv(macro_panel_wide, "data/macro_panel_wide_raw.csv", row.names = FALSE)
 
