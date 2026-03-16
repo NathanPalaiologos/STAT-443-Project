@@ -1,0 +1,25 @@
+---
+title: "02_ARIMA_models"
+output: html_document
+---
+
+```{r setup}
+library(knitr)
+library(tidyverse)
+library(forecast)
+library(lubridate)
+library(ggplot2)
+library(tseries)
+```
+
+```{r source-helpers}
+
+```
+
+### Load the Processed Data
+
+```{r load-data}
+# Load the processed data
+df <- readRDS("../data/macro_df_diff.rds")
+glimpse(df)
+```
