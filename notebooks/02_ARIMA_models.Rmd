@@ -23,3 +23,36 @@ library(tseries)
 df <- readRDS("../data/macro_df_diff.rds")
 glimpse(df)
 ```
+```{r convert dhh, dcorp, dhh_rate, dcorp_rate to ts objects}
+# Convert the target series to time series objects
+target_df <- df |>
+  select(dhh, dcorp, dhh_rate) |>
+  na.omit()
+
+target_ts <- ts(target_df, start =c(1977, 2), frequency = 4)
+
+target_ts[1:10, ] # Check the first few rows of the time series object
+```
+
+### Auto ARIMA Test
+
+```{r auto-arima on target series}
+# Fit auto ARIMA models for each series
+auto_arima_dhh <- auto.arima(target_ts[, "dhh"])
+auto_arima_dcorp <- auto.arima(target_ts[, "dcorp"])
+auto_arima_dhh_rate <- auto.arima(target_ts[, "dhh_rate"])
+
+# Print the model summaries
+summary(auto_arima_dhh)
+summary(auto_arima_dcorp)
+summary(auto_arima_dhh_rate)
+```
+We confirmed this result matches that of our initial check before differencing.
+
+## Forecasting household net savings
+
+### Establishing benchmarks
+
+```{r average forecast}
+# Average forecast for dhh
+```
