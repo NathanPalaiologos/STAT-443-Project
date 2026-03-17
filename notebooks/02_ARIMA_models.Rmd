@@ -20,7 +20,7 @@ library(tseries)
 
 ```{r load-data}
 # Load the processed data
-df <- readRDS("../data/macro_df_diff.rds")
+df <- readRDS("../output/macro_df_diff.rds")
 glimpse(df)
 ```
 ```{r convert dhh, dcorp, dhh_rate, dcorp_rate to ts objects}

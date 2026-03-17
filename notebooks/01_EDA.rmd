@@ -41,7 +41,7 @@ na_summary
 
 # Remove the NA values at the end
 macro_df <- macro_df |>
-  filter(quarterly_date <= as.Date("2025-12-31"))
+  filter(quarterly_date <= as.Date("2019-12-31"))
 ```
 ```{r distribution of key variable values}
 #| fig.width: 8
@@ -125,7 +125,7 @@ summary(eda_df)
 
 ```
 ```{r Save the EDA dataset for later use}
-saveRDS(eda_df, file = "../data/eda_df_nodiff.rds")
+saveRDS(eda_df, file = "../output/eda_df_nodiff.rds")
 ```
 
 
@@ -180,12 +180,25 @@ auto_arima_corp <- auto.arima(corp_ts)
 summary(auto_arima_hh)
 summary(auto_arima_corp)
 ```
-```{r auto.arima checks fpr the main response series in rate of GDI}
+```{r auto.arima checks for the main response series in rate of GDI}
 hh_rate_ts <- ts(eda_df$hh_rate, start = c(1977,1), frequency = 4)
 
 auto_arima_hh_rate <- auto.arima(hh_rate_ts)
 
 summary(auto_arima_hh_rate)
+```
+```{r auto.arima checks for consumption, GDI and GPDI}
+cons_ts <- ts(eda_df$cons, start = c(1977, 1), frequency = 4)
+gdi_ts <- ts(eda_df$gdi, start = c(1977, 1), frequency = 4)
+gpdi_ts <- ts(eda_df$gpdi, start = c(1977, 1), frequency = 4)
+
+auto_arima_cons <- auto.arima(cons_ts)
+auto_arima_gdi <- auto.arima(gdi_ts)
+auto_arima_gpdi <- auto.arima(gpdi_ts)
+
+summary(auto_arima_cons)
+summary(auto_arima_gdi)
+summary(auto_arima_gpdi)
 ```
 By fitting the above checks using `auto.arima`, we see that while the corporate net savings series appear to be random walks, the household net savings series shows some seasonal ARIMA sturcture, indicating the presence of some internal dynamics. Meanwhile, the household net savings rate series shows an IMA(q, 1) structure, indicating that the seasonality patterns in the household net savings series may be mostly driven by changes in GDI, which is consistent with the idea that household savings behavior is closely tied to income dynamics. 
 
@@ -459,5 +472,5 @@ pairs(
 ```{r Save the final differenced dataset}
 glimpse(eda_df)
 
-saveRDS(eda_df, file = "../data/macro_df_diff.rds")
+saveRDS(eda_df, file = "../output/macro_df_diff.rds")
 ```
