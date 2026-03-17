@@ -41,7 +41,7 @@ na_summary
 
 # Remove the NA values at the end
 macro_df <- macro_df |>
-  filter(quarterly_date <= as.Date("2025-12-31"))
+  filter(quarterly_date <= as.Date("2019-12-31"))
 ```
 ```{r distribution of key variable values}
 #| fig.width: 8
@@ -116,8 +116,7 @@ eda_df <- macro_df |>
   ) |>
   mutate( # Standardize unit
     hh_rate = (hh_save / gdi) ,
-    nat_rate = (nat_save / gdi) ,
-    corp_rate = (corp_save / gdi)
+    nat_rate = (nat_save / gdi)
   ) |>
   arrange(date)
 
@@ -126,7 +125,7 @@ summary(eda_df)
 
 ```
 ```{r Save the EDA dataset for later use}
-saveRDS(eda_df, file = "../data/eda_df_nodiff.rds")
+saveRDS(eda_df, file = "../output/eda_df_nodiff.rds")
 ```
 
 
@@ -171,6 +170,39 @@ ggplot(main_response_long, aes(x = date, y = value)) +
     y = "Net savings"
   )
 ```
+```{r auto.arima check for main response series}
+hh_ts <- ts(eda_df$hh_save, start = c(1977, 1), frequency = 4)
+corp_ts <- ts(eda_df$corp_save, start = c(1977, 1), frequency = 4)
+
+auto_arima_hh <- auto.arima(hh_ts)
+auto_arima_corp <- auto.arima(corp_ts)
+
+summary(auto_arima_hh)
+summary(auto_arima_corp)
+```
+```{r auto.arima checks for the main response series in rate of GDI}
+hh_rate_ts <- ts(eda_df$hh_rate, start = c(1977,1), frequency = 4)
+
+auto_arima_hh_rate <- auto.arima(hh_rate_ts)
+
+summary(auto_arima_hh_rate)
+```
+```{r auto.arima checks for consumption, GDI and GPDI}
+cons_ts <- ts(eda_df$cons, start = c(1977, 1), frequency = 4)
+gdi_ts <- ts(eda_df$gdi, start = c(1977, 1), frequency = 4)
+gpdi_ts <- ts(eda_df$gpdi, start = c(1977, 1), frequency = 4)
+
+auto_arima_cons <- auto.arima(cons_ts)
+auto_arima_gdi <- auto.arima(gdi_ts)
+auto_arima_gpdi <- auto.arima(gpdi_ts)
+
+summary(auto_arima_cons)
+summary(auto_arima_gdi)
+summary(auto_arima_gpdi)
+```
+By fitting the above checks using `auto.arima`, we see that while the corporate net savings series appear to be random walks, the household net savings series shows some seasonal ARIMA sturcture, indicating the presence of some internal dynamics. Meanwhile, the household net savings rate series shows an IMA(q, 1) structure, indicating that the seasonality patterns in the household net savings series may be mostly driven by changes in GDI, which is consistent with the idea that household savings behavior is closely tied to income dynamics. 
+
+However, all three series are non-stationary in levels, which motivates the need for differencing or other transformations to achieve stationarity before modeling. 
 
 ### Transformations and Stationarity Checks
 
@@ -228,7 +260,6 @@ eda_df <- eda_df |>
     dcorp = corp_save - lag(corp_save),
     dnat = nat_save - lag(nat_save),
     dhh_rate = hh_rate - lag(hh_rate),
-    dcorp_rate = corp_rate - lag(corp_rate),
     dnat_rate = nat_rate - lag(nat_rate),
     dunemp = unemp - lag(unemp),
     dinterest = interest - lag(interest),
@@ -242,7 +273,6 @@ summary(select(
   dhh,
   dcorp,
   dhh_rate,
-  dcorp_rate,
   dnat_rate,
   dunemp,
   dinterest,
@@ -272,9 +302,9 @@ ggplot(diff_long, aes(x = date, y = value)) +
 
 ```
 
-```{r Plot transformed household and corporate rate series}
+```{r Plot transformed household and national series}
 transformed_long <- eda_df |>
-  select(date, dhh_rate, dcorp_rate) |>
+  select(date, dhh_rate, dnat_rate) |>
   pivot_longer(
     cols = -date,
     names_to = "series",
@@ -286,7 +316,7 @@ ggplot(transformed_long, aes(x = date, y = value*100)) +
   facet_wrap(~ series, scales = "free_y", ncol = 1) +
   theme_minimal() +
   labs(
-    title = "Change of household and corporate net saving Rates",
+    title = "Change of household and national net saving Rates",
     x = "Quarter",
     y = "Change"
   )
@@ -294,75 +324,62 @@ ggplot(transformed_long, aes(x = date, y = value*100)) +
 
 ```{r Time-series diagnostics for household net savings}
 hh_ts <- ts(
-  eda_df$hh_rate,
-  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+  eda_df$hh_save,
+  start = c(1977, 1),
   frequency = 4
 )
 
 dhh_ts <- diff(hh_ts)
 
 par(mfrow = c(2, 2))
-plot(hh_ts, main = "Household net saving rate")
-plot(dhh_ts, main = "First difference: household net savings rate")
-acf(na.omit(dhh_ts), lag.max = 20, main = "ACF: diff household savings rate")
-pacf(na.omit(dhh_ts), lag.max = 20, main = "PACF: diff household savings rate")
+plot(hh_ts, main = "Household net savings")
+plot(dhh_ts, main = "First difference: household net savings")
+acf(na.omit(dhh_ts), lag.max = 20, main = "ACF: diff household savings")
+pacf(na.omit(dhh_ts), lag.max = 20, main = "PACF: diff household savings")
 par(mfrow = c(1, 1))
 
 adf.test(na.omit(dhh_ts))
 ```
 
-```{r Time-series diagnostics for corporate net savings}
+```{r Benhmark diagnostics for corporate net savings}
 corp_ts <- ts(
-  eda_df$corp_rate,
-  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+  eda_df$corp_save,
+  start = c(1977, 1),
   frequency = 4
 )
 
 dcorp_ts <- diff(corp_ts)
 
 par(mfrow = c(2, 2))
-plot(corp_ts, main = "Corporate net saving rate")
-plot(dcorp_ts, main = "First difference: corporate net saving rate")
-acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate saving rate")
-pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate saving rate")
-par(mfrow = c(1, 1))
-
-adf.test(na.omit(dcorp_ts))
+plot(corp_ts, main = "Corporate net savings")
+plot(dcorp_ts, main = "First difference: corporate net savings")
+acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate savings")
+pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate savings")
 ```
 
-
-```{r Benchmark diagnostics for national net savings}
-nat_ts <- ts(
-  eda_df$nat_rate,
-  start = c(year(min(eda_df$date)), quarter(min(eda_df$date))),
+```{r Benchmark diagnostics for household saving rates}
+hh_rate_ts <- ts(
+  eda_df$hh_rate,
+  start = c(1977, 1),
   frequency = 4
 )
 
-dnat_ts <- diff(nat_ts)
+dhh_rate_ts <- diff(hh_rate_ts)
 
 par(mfrow = c(2, 2))
-plot(nat_ts, main = "National net saving rate")
-plot(dnat_ts, main = "First difference: national net saving rate")
-acf(na.omit(dnat_ts), lag.max = 20, main = "ACF: diff national saving rate")
-pacf(na.omit(dnat_ts), lag.max = 20, main = "PACF: diff national saving rate")
-par(mfrow = c(1, 1))
-
-adf.test(na.omit(dnat_ts))
+plot(hh_rate_ts, main = "Household net saving rate")
+plot(dhh_rate_ts, main = "First difference: household net saving rate")
+acf(na.omit(dhh_rate_ts), lag.max = 20, main = "ACF: diff household saving rate")
+pacf(na.omit(dhh_rate_ts), lag.max = 20, main = "PACF: diff household saving rate")
 ```
 
-- From the above, we see that the differenced household and corporate net saving rates appear to be stationary based on the ADF test and the visual diagnostics. 
+- From the above, we see that the differenced household and corporate net savings appear to be stationary based on the ADF test and the visual diagnostics. 
 - But they don't demonstrate strong autocorrelation, which suggests that they may be mostly driven by exogenous factors rather than strong internal dynamics. 
 - The national net saving rate shows similar patterns, but with slightly stronger autocorrelation at lag 1, which may reflect some persistence in the overall saving behavior of the economy.
 
 ```{r Lead-lag check of household and corporate net savings}
-options(repr.plot.width = 10, repr.plot.height = 5)
-par(mfrow = c(1, 2))
 ccf(na.omit(eda_df$dhh), na.omit(eda_df$dcorp),
     main = "hh vs corp net savings")
-ccf(na.omit(eda_df$dhh_rate), na.omit(eda_df$dcorp_rate),
-    main = "hh vs corp net saving rates")
-par(mfrow = c(1, 1))
-
 ```
 
 
@@ -401,40 +418,28 @@ ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dcorp),
 
 
 ```{r Lead-lag checks with GDI, unemployment, and consumptions}
+#| fig.width: 7
+#| fig.height: 2.5
 par(
-  mfrow = c(2, 4),
-  mar = c(5, 5, 3, 1),   # c(bottom, left, top, right)
-  mgp = c(2, 0.8, 0),        # Pulls axis labels closer to the plot
-  cex.main = 0.95,           # Scales down the main title
-  cex.lab = 0.9,             # Scales down axis labels
-  cex.axis = 0.85            # Scales down axis tick values
+  mfrow = c(1, 4)
 )
 
 ccf(na.omit(eda_df$ldgdi), na.omit(eda_df$dhh_rate),
     main = "log GDI vs hh saving rate")
-ccf(na.omit(eda_df$ldgdi), na.omit(eda_df$dcorp_rate),
-    main = "log GDI vs corp saving rate")
 
 ccf(na.omit(eda_df$dunemp), na.omit(eda_df$dhh_rate),
     main = "Unemp vs hh saving rate")
-ccf(na.omit(eda_df$dunemp), na.omit(eda_df$dcorp_rate),
-    main = "Unemp vs corp saving rate")
 
 ccf(na.omit(eda_df$ldcons), na.omit(eda_df$dhh_rate),
     main = "Cons vs hh saving rate")
-ccf(na.omit(eda_df$ldcons), na.omit(eda_df$dcorp_rate),
-    main = "Cons vs corp saving rate")
 
 ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dhh_rate),
     main = "GPDI vs hh saving rate")
-ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dcorp_rate),
-    main = "GPDI vs corp saving rate")
 
 par(mfrow = c(1, 1))
 ```
 From the above, we see the following:
 
-- The differenced household and corporate net saving rates appear to be stationary based on the ADF test and the visual diagnostics. But they don't demonstrate strong autocorrelation, which suggests that they may be mostly driven by exogenous factors rather than strong internal dynamics.
 - Both househould and corporate net saving rates show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
 - Lead lag patterns between household and corporate net saving change is strong, with household net saving change leading corporate net saving change by 1-2 quarters, which is consistent with the idea that household savings behavior may influence corporate savings decisions through demand channels.
 
@@ -455,9 +460,17 @@ pairs(
   main = "Scatterplot matrix for key variables after differencing"
 )
 ```
+```{r Scatterplot matrix of differenced saving rates}
+pairs(
+  eda_df |>
+    select(dhh_rate, ldgdi, ldcons, dunemp, ldcpi, dinterest) |>
+    na.omit(),
+  main = "Scatterplot matrix for key variables after differencing"
+)
+```
 
 ```{r Save the final differenced dataset}
 glimpse(eda_df)
 
-saveRDS(eda_df, file = "../data/macro_df_diff.rds")
+saveRDS(eda_df, file = "../output/macro_df_diff.rds")
 ```
