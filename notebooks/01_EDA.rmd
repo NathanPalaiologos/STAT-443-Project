@@ -200,8 +200,6 @@ summary(auto_arima_cons)
 summary(auto_arima_gdi)
 summary(auto_arima_gpdi)
 ```
-By fitting the above checks using `auto.arima`, we see that while the corporate net savings series appear to be random walks, the household net savings series shows some seasonal ARIMA sturcture, indicating the presence of some internal dynamics. Meanwhile, the household net savings rate series shows an IMA(q, 1) structure, indicating that the seasonality patterns in the household net savings series may be mostly driven by changes in GDI, which is consistent with the idea that household savings behavior is closely tied to income dynamics. 
-
 However, all three series are non-stationary in levels, which motivates the need for differencing or other transformations to achieve stationarity before modeling. 
 
 ### Transformations and Stationarity Checks
