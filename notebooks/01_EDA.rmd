@@ -122,16 +122,29 @@ eda_df <- macro_df |>
 
 glimpse(eda_df)
 summary(eda_df)
-
 ```
 ```{r Save the EDA dataset for later use}
 saveRDS(eda_df, file = "../output/eda_df_nodiff.rds")
+```
+
+```{r splitting into train and test}
+# We keep the last 5 years (20 quarters) for testing, which means the training set includes data up to the end of 2014.
+train_df <- eda_df |>
+  filter(date <= as.Date("2014-12-31"))
+test_df <- eda_df |>
+  filter(date > as.Date("2014-12-31"))
+
+saveRDS(train_df, file = "../output/train_df.rds")
+saveRDS(test_df, file = "../output/test_df.rds")
 ```
 
 
 ```{r Compare the three net savings series}
 #| fig.width: 8
 #| fig.height: 4
+# Reload train data to ensure we are using the same dataset as in the later modeling steps
+eda_df <- readRDS("../output/train_df.rds")
+
 savings_long <- eda_df |>
   select(date, nat_save, hh_save, corp_save) |>
   pivot_longer(
@@ -353,6 +366,9 @@ plot(corp_ts, main = "Corporate net savings")
 plot(dcorp_ts, main = "First difference: corporate net savings")
 acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate savings")
 pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate savings")
+
+# ADF test
+adf.test(na.omit(dcorp_ts))
 ```
 
 ```{r Benchmark diagnostics for household saving rates}
@@ -369,6 +385,9 @@ plot(hh_rate_ts, main = "Household net saving rate")
 plot(dhh_rate_ts, main = "First difference: household net saving rate")
 acf(na.omit(dhh_rate_ts), lag.max = 20, main = "ACF: diff household saving rate")
 pacf(na.omit(dhh_rate_ts), lag.max = 20, main = "PACF: diff household saving rate")
+
+# ADF test
+adf.test(na.omit(dhh_rate_ts))
 ```
 
 - From the above, we see that the differenced household and corporate net savings appear to be stationary based on the ADF test and the visual diagnostics. 
@@ -476,4 +495,6 @@ saveRDS(eda_df, file = "../output/macro_df_diff.rds")
 ```{r import variograms}
 knitr::include_graphics("../output/variograms_all.png")
 ```
-The plots indicate that most variables in levels are not stationary, because their empirical variogram G increases with lag and often departs from the theoretical stationary variogram H. For many level variables, this increase is approximately linear rather than sharply curved, which suggests that a single difference is likely sufficient to achieve approximate stationarity. This pattern is especially obvious for variables such as national net savings, household net savings, corporate net savings, unemployment rate, market interest rates, household net saving rates, and corporate net saving rates, where G rises with lag and H does not fully overlap with it. Some series, such as population, gross domestic income, household consumption, CPI, and gross private domestic investment, show stronger divergence between G and H, with growth in G that is steeper. This indicates these variables are even less stationary. In contrast, the differenced variables (d_hr, d_cr, d_gdi, d_unemp, d_rate, d_cpi, d_gpdi) and their lagged versions show overlapping G and H. This strongly suggests that these transformed series are approximately stationary. Overall, the variograms support the conclusion that first differencing is generally needed for the level variables, while there is little evidence that second differencing is required.
+- The plots indicate that most variables in levels are not stationary, because their empirical variogram G increases with lag and often departs from the theoretical stationary variogram H. 
+- For many level variables, this increase is approximately linear rather than sharply curved, which suggests that a single difference is likely sufficient to achieve approximate stationarity. This pattern is especially obvious for variables such as national net savings, household net savings, corporate net savings, unemployment rate, market interest rates, household net saving rates, and corporate net saving rates, where G rises with lag and H does not fully overlap with it. 
+- Some series, such as population, gross domestic income, household consumption, CPI, and gross private domestic investment, show stronger divergence between G and H, with growth in G that is steeper. This indicates these variables are even less stationary. In contrast, the differenced variables (`dhh`, `dcorp`, `ldgdi`, `dunemp`, `dinterest`, `ldcpi`, `ldgpdi`) and their lagged versions show overlapping G and H. This strongly suggests that these transformed series are approximately stationary. Overall, the variograms support the conclusion that first differencing is generally needed for the level variables, while there is little evidence that second differencing is required.

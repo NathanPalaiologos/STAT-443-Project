@@ -1,8 +1,10 @@
 library(tidyverse)
 library(tsibble)
 
-dat <- read_csv("data/macro_panel_wide_raw.csv")
-glimpse(dat)
+dat <- read_csv("data/macro_panel_wide_raw.csv")|>
+  mutate(quarterly_date = as.Date(quarterly_date)) |>
+  arrange(quarterly_date)|>
+  filter(quarterly_date <= as.Date("2014-12-31")) # Filter to the desired date range
 
 # Create variables according to Forecast Plan.md.
 # Note this is just my implementtion of the plan.
@@ -16,23 +18,17 @@ dat2 <- dat %>%
     corp_rate = corporate_net_savings / gross_domestic_income,
     
     # first differences of targets (consistent with macro_df_diff.rds naming)
+    d_hh = household_net_savings - lag(household_net_savings),
+    d_corp = corporate_net_savings - lag(corporate_net_savings),
     dhh_rate   = hh_rate - lag(hh_rate),
     dcorp_rate = corp_rate - lag(corp_rate),
     
     # first differences of candidate macro variables
-    dgdi      = gross_domestic_income - lag(gross_domestic_income),
+    ldgdi      = log(gross_domestic_income) - lag(log(gross_domestic_income)),
     dunemp    = unemployment_rate - lag(unemployment_rate),
     dinterest = market_interest_rates - lag(market_interest_rates),
-    dcpi      = cpi_inflation_indicator - lag(cpi_inflation_indicator),
-    dgpdi     = gross_private_domestic_investment - lag(gross_private_domestic_investment)
-  ) %>%
-  mutate(
-    # one-quarter lagged predetermined information set
-    L1_dgdi      = lag(dgdi, 1),
-    L1_dunemp    = lag(dunemp, 1),
-    L1_dinterest = lag(dinterest, 1),
-    L1_dcpi      = lag(dcpi, 1),
-    L1_dgpdi     = lag(dgpdi, 1)
+    ldcpi      = log1p(cpi_inflation_indicator) - log1p(lag(cpi_inflation_indicator)),
+    ldgpdi     = log1p(gross_private_domestic_investment) - log1p(lag(gross_private_domestic_investment))
   )
 
 glimpse(dat2)
