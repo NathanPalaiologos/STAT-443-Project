@@ -13,6 +13,7 @@ library(tseries)
 ```
 
 ```{r source-helpers}
+# Load helpers for one-step-ahead forecasts
 
 ```
 
@@ -21,6 +22,7 @@ library(tseries)
 ```{r load-data}
 # Load the processed data
 df <- readRDS("../output/macro_df_diff.rds")
+test_df <- readRDS("../output/test_df.rds")
 glimpse(df)
 ```
 ```{r convert dhh, dcorp, dhh_rate, dcorp_rate to ts objects}
@@ -32,6 +34,12 @@ target_df <- df |>
 target_ts <- ts(target_df, start =c(1977, 2), frequency = 4)
 
 target_ts[1:10, ] # Check the first few rows of the time series object
+```
+```{r Plot the target series}
+# Plot the target series
+autoplot(target_ts) + 
+  labs(title = "Target Series Over Time", x = "Year", y = "Value") + 
+  theme_minimal()
 ```
 
 ### Auto ARIMA Test
@@ -56,3 +64,19 @@ We confirmed this result matches that of our initial check before differencing.
 ```{r average forecast}
 # Average forecast for dhh
 ```
+
+```{r Persistence forecast}
+# Persistence forecast for dhh
+```
+
+### Holt-Winters forecast for dhh
+
+### ARIMA forecast for dhh
+
+## Forecasting corporate net savings
+
+### Establishing benchmarks
+
+### Holt-Winters forecast for dcorp
+
+### ARIMA forecast for dcorp
