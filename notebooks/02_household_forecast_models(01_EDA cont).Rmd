@@ -1,0 +1,429 @@
+---
+title: "02_household_forecast_models(01_EDA cont)"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(knitr)
+library(tidyverse)
+library(forecast)
+library(lubridate)
+library(ggplot2)
+library(tseries)
+
+source("helpers_forecast.R")
+```
+
+```{r Load processed data}
+df <- readRDS("../output/eda_df_nodiff.rds") |>
+  filter(date <= as.Date("2019-12-31")) |>
+  arrange(date)
+
+glimpse(df)
+summary(df)
+```
+```{r data progressing}
+df <- df |>
+  mutate(
+    gdi_qoq = (gdi / lag(gdi) - 1),
+    gdi_yoy = (gdi / lag(gdi, 4) - 1),
+    ldgdi = log(gdi) - log(lag(gdi)),
+    dhh = hh_save - lag(hh_save),
+    dcorp = corp_save - lag(corp_save),
+    dnat = nat_save - lag(nat_save),
+    dhh_rate = hh_rate - lag(hh_rate),
+    dnat_rate = nat_rate - lag(nat_rate),
+    dunemp = unemp - lag(unemp),
+    dinterest = interest - lag(interest),
+    ldcons = log1p(cons) - log1p(lag(cons)),
+    ldcpi = log1p(cpi) - log1p(lag(cpi)),
+    ldgpdi = log1p(gpdi) - log1p(lag(gpdi))
+  )
+
+glimpse(df)
+```
+
+
+```{r Build household modeling data}
+model_df <- df |>
+  transmute(
+    date,
+    y = dhh,
+    gprev = lag(ldgdi, 1),
+    cprev = lag(ldcons, 1),
+    uprev = lag(dunemp, 1),
+    iprev = lag(dinterest, 1),
+    cpiprev = lag(ldcpi, 1)
+  ) |>
+  drop_na()
+
+glimpse(model_df)
+summary(model_df)
+
+```
+
+
+
+```{r Train and holdout split}
+train_df <- model_df |>
+  filter(date <= as.Date("2014-12-31"))
+
+holdout_df <- model_df |>
+  filter(date > as.Date("2014-12-31"))
+
+ntrain <- nrow(train_df)
+ntotal <- nrow(model_df)
+
+cat("ntrain =", ntrain, "\n")
+cat("nholdout =", nrow(holdout_df), "\n")
+cat("ntotal =", ntotal, "\n")
+```
+
+
+```{r Convert to time-series objects}
+start_train <- c(year(min(train_df$date)), quarter(min(train_df$date)))
+start_all <- c(year(min(model_df$date)), quarter(min(model_df$date)))
+
+train_y_ts <- ts(train_df$y, start = start_train, frequency = 4)
+holdout_y_ts <- ts(
+  holdout_df$y,
+  start = c(year(min(holdout_df$date)), quarter(min(holdout_df$date))),
+  frequency = 4
+)
+all_y_ts <- ts(model_df$y, start = start_all, frequency = 4)
+
+autoplot(all_y_ts) +
+  labs(
+    title = "Household net savings change",
+    x = "Quarter",
+    y = "dhh"
+  ) +
+  theme_minimal()
+```
+
+
+```{r Benchmarks}
+avg_obj <- avg_fc(as.numeric(train_y_ts), as.numeric(holdout_y_ts))
+persist_obj <- persist_fc(as.numeric(train_y_ts), as.numeric(holdout_y_ts))
+persist_q_obj <- persistbyperiod_fc(as.numeric(train_y_ts), as.numeric(holdout_y_ts), periodicity = 4)
+iid_q_obj <- iidbyperiod_fc(as.numeric(train_y_ts), as.numeric(holdout_y_ts), periodicity = 4)
+
+benchmark_tbl <- tibble(
+  method = c("Average", "Persistence", "Seasonal persistence (quarter)", "Seasonal mean (quarter)"),
+  rmse = c(avg_obj$rmse, persist_obj$rmse, persist_q_obj$rmse, iid_q_obj$rmse)
+)
+
+kable(benchmark_tbl, digits = 4)
+
+```
+
+```{r Optional additive seasonal exponential smoothing}
+hw_obj <- tryCatch({
+  hw_fit <- HoltWinters(train_y_ts, seasonal = "additive")
+  hw_coef <- hw_fit$coefficients
+
+  level <- unname(hw_coef[1])
+  slope <- if (length(hw_coef) >= 2) unname(hw_coef[2]) else 0
+  season <- unname(hw_coef[grepl("^s", names(hw_coef))])
+
+  aseason_fc(
+    train = as.numeric(train_y_ts),
+    holdout = as.numeric(holdout_y_ts),
+    alpha = hw_fit$alpha,
+    beta = hw_fit$beta,
+    gamma = hw_fit$gamma,
+    level = level,
+    slope = slope,
+    season = season
+  )
+}, error = function(e) {
+  list(rmse = NA_real_, fc = rep(NA_real_, length(holdout_y_ts)))
+})
+
+hw_obj$rmse
+```
+
+```{r Auto ARIMA on the stationary transformed household series}
+hh_auto <- auto.arima(train_y_ts, seasonal = TRUE, stationary = TRUE)
+summary(hh_auto)
+
+
+arma_vec <- hh_auto$arma
+
+order_vec <- c(arma_vec[1], arma_vec[6], arma_vec[2])
+seasonal_vec <- list(
+  order = c(arma_vec[3], arma_vec[7], arma_vec[4]),
+  period = arma_vec[5]
+)
+
+include_mean_auto <- any(names(hh_auto$coef) %in% c("intercept", "mean"))
+
+arima_obj <- arima_fc(
+  tsdata = as.numeric(all_y_ts),
+  ntrain = ntrain,
+  order = order_vec,
+  seasonal = seasonal_vec,
+  method = "ML",
+  traincoef = hh_auto$coef,
+  include.mean = include_mean_auto
+)
+
+arima_obj$rmse
+```
+
+
+```{r Neighbor models around auto.arima}
+
+candidate_specs <- tribble(
+  ~name,         ~p, ~d, ~q, ~P, ~D, ~Q, ~period, ~include_mean,
+  "auto_same",     0,  0,  1,  0,  0,  2,   4,      FALSE,
+  "q_down",        0,  0,  0,  0,  0,  2,   4,      FALSE,
+  "q_up",          0,  0,  2,  0,  0,  2,   4,      FALSE,
+  "p_up",          1,  0,  1,  0,  0,  2,   4,      TRUE,
+  "P_up",          0,  0,  1,  1,  0,  2,   4,      FALSE,
+  "Q_down",        0,  0,  1,  0,  0,  1,   4,      FALSE,
+  "p1q1_Q1",       1,  0,  1,  0,  0,  1,   4,      TRUE,
+  "p1q0_Q2",       1,  0,  0,  0,  0,  2,   4,      TRUE
+)
+
+fit_neighbor <- function(name, p, d, q, P, D, Q, period, include_mean) {
+  fit_try <- tryCatch(
+    arima(
+      train_y_ts,
+      order = c(p, d, q),
+      seasonal = list(order = c(P, D, Q), period = period),
+      method = "ML",
+      include.mean = include_mean
+    ),
+    error = function(e) {
+      message(name, " failed in ML: ", e$message)
+      NULL
+    }
+  )
+
+  method_used <- "ML"
+
+  if (is.null(fit_try)) {
+    fit_try <- tryCatch(
+      arima(
+        train_y_ts,
+        order = c(p, d, q),
+        seasonal = list(order = c(P, D, Q), period = period),
+        method = "CSS",
+        include.mean = include_mean
+      ),
+      error = function(e) {
+        message(name, " failed in CSS: ", e$message)
+        NULL
+      }
+    )
+    method_used <- "CSS"
+  }
+
+  if (is.null(fit_try)) {
+    return(tibble(
+      name = name,
+      p = p, d = d, q = q,
+      P = P, D = D, Q = Q,
+      period = period,
+      include_mean = include_mean,
+      method_used = NA_character_,
+      aic = NA_real_,
+      loglik = NA_real_,
+      rmse = NA_real_
+    ))
+  }
+
+  fc_obj <- arima_fc(
+    tsdata = as.numeric(all_y_ts),
+    ntrain = ntrain,
+    order = c(p, d, q),
+    seasonal = list(order = c(P, D, Q), period = period),
+    method = method_used,
+    traincoef = fit_try$coef,
+    include.mean = include_mean
+  )
+
+  tibble(
+    name = name,
+    p = p, d = d, q = q,
+    P = P, D = D, Q = Q,
+    period = period,
+    include_mean = include_mean,
+    method_used = method_used,
+    aic = fit_try$aic,
+    loglik = fit_try$loglik,
+    rmse = fc_obj$rmse
+  )
+}
+
+neighbor_results <- purrr::pmap_dfr(
+  candidate_specs,
+  fit_neighbor
+) |>
+  arrange(rmse)
+
+kable(neighbor_results, digits = 3)
+```
+
+```{r Regression benchmarks with lagged predictors}
+
+reg_gdi <- lm(y ~ gprev, data = train_df)
+summary(reg_gdi)
+
+pred_reg_gdi <- predict(reg_gdi, newdata = holdout_df)
+rmse_reg_gdi <- sqrt(mean((holdout_df$y - pred_reg_gdi)^2))
+
+reg_full <- lm(y ~ gprev + cprev + uprev + iprev + cpiprev, data = train_df)
+summary(reg_full)
+
+pred_reg_full <- predict(reg_full, newdata = holdout_df)
+rmse_reg_full <- sqrt(mean((holdout_df$y - pred_reg_full)^2))
+
+reg_tbl <- tibble(
+  method = c("Regression: lagged GDI only", "Regression: full lagged predictors"),
+  rmse = c(rmse_reg_gdi, rmse_reg_full)
+)
+
+kable(reg_tbl, digits = 4)
+
+```
+
+```{r Residual diagnostics for the fuller regression}
+par(mfrow = c(2, 2))
+plot.ts(resid(reg_full), main = "Regression residuals")
+acf(resid(reg_full), lag.max = 20, main = "ACF: regression residuals")
+pacf(resid(reg_full), lag.max = 20, main = "PACF: regression residuals")
+qqnorm(resid(reg_full)); qqline(resid(reg_full))
+par(mfrow = c(1, 1))
+
+```
+
+```{r ARMAX with lagged predictors}
+xcols_gdi <- c("gprev")
+
+train_arx_gdi <- arima(
+  train_df$y,
+  order = c(1, 0, 0),
+  method = "CSS",
+  include.mean = TRUE,
+  xreg = as.matrix(train_df[, xcols_gdi, drop = FALSE])
+)
+
+print(train_arx_gdi)
+
+arx_gdi_obj <- armax_fc(
+  tsdata = model_df$y,
+  ntrain = ntrain,
+  order = c(1, 0, 0),
+  method = "CSS",
+  traincoef = train_arx_gdi$coef,
+  include.mean = TRUE,
+  xreg = as.matrix(model_df[, xcols_gdi, drop = FALSE])
+)
+
+arx_gdi_obj$rmse
+```
+
+```{r lagged predictors}
+xcols_full <- c("gprev", "cprev", "uprev", "iprev", "cpiprev")
+
+train_arx_full <- arima(
+  train_df$y,
+  order = c(1, 0, 0),
+  method = "CSS",
+  include.mean = TRUE,
+  xreg = as.matrix(train_df[, xcols_full, drop = FALSE])
+)
+
+print(train_arx_full)
+
+arx_full_obj <- armax_fc(
+  tsdata = model_df$y,
+  ntrain = ntrain,
+  order = c(1, 0, 0),
+  method = "CSS",
+  traincoef = train_arx_full$coef,
+  include.mean = TRUE,
+  xreg = as.matrix(model_df[, xcols_full, drop = FALSE])
+)
+
+arx_full_obj$rmse
+```
+
+```{r Compare all methods}
+rmse_tbl <- tibble(
+  method = c(
+    "Average",
+    "Persistence",
+    "Seasonal persistence (quarter)",
+    "Seasonal mean (quarter)",
+    "Holt-Winters additive seasonal",
+    "Auto ARIMA",
+    "Regression: lagged GDI only",
+    "Regression: full lagged predictors",
+    "ARX(1): lagged GDI only",
+    "ARX(1): full lagged predictors"
+  ),
+  rmse = c(
+    avg_obj$rmse,
+    persist_obj$rmse,
+    persist_q_obj$rmse,
+    iid_q_obj$rmse,
+    hw_obj$rmse,
+    arima_obj$rmse,
+    rmse_reg_gdi,
+    rmse_reg_full,
+    arx_gdi_obj$rmse,
+    arx_full_obj$rmse
+  )
+) |>
+  arrange(rmse)
+
+kable(rmse_tbl, digits = 4)
+```
+
+```{r Forecast comparison plot}
+compare_df <- tibble(
+  date = holdout_df$date,
+  actual = holdout_df$y,
+  average = avg_obj$fc,
+  persistence = persist_obj$fc,
+  arima = arima_obj$fc,
+  reg_full = pred_reg_full,
+  arx_full = arx_full_obj$fc
+)
+
+compare_long <- compare_df |>
+  pivot_longer(
+    cols = -date,
+    names_to = "series",
+    values_to = "value"
+  )
+
+ggplot(compare_long, aes(x = date, y = value, color = series)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  labs(
+    title = "Holdout-period forecasts for household net savings change",
+    x = "Quarter",
+    y = "dhh",
+    color = "Series"
+  )
+```
+
+```{r Pairwise comparison among top forecasts}
+pairs(
+  compare_df |>
+    select(average, persistence, arima, reg_full, arx_full),
+  main = "Pairwise comparison of holdout forecasts"
+)
+
+```
+
+
+
