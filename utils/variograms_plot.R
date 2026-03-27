@@ -27,8 +27,8 @@ dat2 <- dat %>%
     ldgdi      = log(gross_domestic_income) - lag(log(gross_domestic_income)),
     dunemp    = unemployment_rate - lag(unemployment_rate),
     dinterest = market_interest_rates - lag(market_interest_rates),
-    ldcpi      = log(cpi_inflation_indicator) - lag(log(cpi_inflation_indicator)),
-    ldgpdi     = log(gross_private_domestic_investment) - lag(log(gross_private_domestic_investment))
+    ldcpi      = log1p(cpi_inflation_indicator) - log1p(lag(cpi_inflation_indicator)),
+    ldgpdi     = log1p(gross_private_domestic_investment) - log1p(lag(gross_private_domestic_investment))
   )
 
 glimpse(dat2)
