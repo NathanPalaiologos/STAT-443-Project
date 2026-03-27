@@ -56,7 +56,7 @@ par(mfrow = c(1, 1)) # Reset to default layout
 
 # Plot ACF and PACF for the target series
 par(
-  mfrow = c(2, 2) # 3 rows, 2 columns
+  mfrow = c(2, 2) # 2 rows, 2 columns
 )
 
 acf(target_ts[, "dhh"], main = "ACF of dhh")
