@@ -500,19 +500,30 @@ reg_ar1_cossin_fc = function(train, holdout, newx, newx_prev, bvec, phi,
 # GENERAL ARIMA FORECAST (ARIMA/ARMA.ARMAX)
 # (armaobj, n.ahead)
 
-y_predict = function(armaobj, n.ahead, se.fit = TRUE, alpha = 0.10) {
+y_predict = function(armaobj, n.ahead, se.fit = TRUE, alpha = 0.10, iprint = FALSE) {
   predobj = predict(armaobj, n.ahead = n.ahead, se.fit = se.fit)
-  cv = qnorm(1 - alpha / 2)
   
-  lwr = predobj$pred - cv * predobj$se
-  upr = predobj$pred + cv * predobj$se
-  out = cbind(lwr, predobj$pred, upr)
-  colnames(out) = c("lwr", "pred", "upr")
+  # If standard errors are requested and available, compute intervals
+  if (isTRUE(se.fit) && !is.null(predobj$se)) {
+    cv = qnorm(1 - alpha / 2)
+    
+    lwr = predobj$pred - cv * predobj$se
+    upr = predobj$pred + cv * predobj$se
+    out = cbind(lwr, predobj$pred, upr)
+    colnames(out) = c("lwr", "pred", "upr")
+    
+    if (iprint) {
+      print(out)
+      ypred1step = out[1, ]
+      cat("1-step ahead forecast interval for y\n")
+      print(round(ypred1step, 3))
+    } else {
+      ypred1step = out[1, ]
+    }
+    
+    return(list(ypred1step = ypred1step, pred = predobj$pred, se = predobj$se))
+  }
   
-  print(out)
-  ypred1step = out[1, ]
-  cat("1-step ahead forecast interval for y\n")
-  print(round(ypred1step, 3))
-  
-  return(list(ypred1step = ypred1step, pred = predobj$pred, se = predobj$se))
+  # When se.fit = FALSE or standard errors are unavailable, skip intervals
+  return(list(pred = predobj$pred))
 }
