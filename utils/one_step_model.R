@@ -172,7 +172,7 @@ lholt_fc = function(train, holdout, alpha, beta, level, slope, iprint = FALSE) {
 # SEASONAL PERSISTENCE
 # (train, holdout, d=12)
 
-persistbymonth_fc = function(train, holdout, iprint = FALSE, d = 12) {
+persistbymonth_fc = function(train, holdout, d = 12, iprint = FALSE) {
   n = length(train)
   nholdout = length(holdout)
   
