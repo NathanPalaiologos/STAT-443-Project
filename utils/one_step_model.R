@@ -9,52 +9,52 @@
 # PERSISTENCE MODEL
 # (train, holdout)
 
-persist_fc = function(train, holdout, iprint = FALSE) {
-  n = length(train)
-  nholdout = length(holdout)
+persist_fc <- function(train, holdout, iprint = FALSE) {
+  n <- length(train)
+  nholdout <- length(holdout)
   
-  mse = 0
-  fc_vec = rep(NA, nholdout)
+  mse <- 0
+  fc_vec <- rep(NA, nholdout)
   
-  fc = train[n]
-  yt = holdout[1]
-  fc_vec[1] = fc
-  fcerror = yt - fc
-  mse = mse + fcerror^2
+  fc <- train[n]
+  yt <- holdout[1]
+  fc_vec[1] <- fc
+  fcerror <- yt - fc
+  mse <- mse + fcerror^2
   
   if (nholdout >= 2) {
     for (i in 2:nholdout) {
-      yt = holdout[i]
-      fc = holdout[i - 1]
-      fc_vec[i] = fc
-      fcerror = yt - fc
-      mse = mse + fcerror^2
+      yt <- holdout[i]
+      fc <- holdout[i - 1]
+      fc_vec[i] <- fc
+      fcerror <- yt - fc
+      mse <- mse + fcerror^2
     }
   }
   
-  rmse = sqrt(mse / nholdout)
+  rmse <- sqrt(mse / nholdout)
   return(list(fc = fc_vec, rmse = rmse))
 }
 
 # IID/AVERAGE MODEL
 # (train, holdout)  
 
-iid_fc = function(train, holdout, iprint = FALSE) {
-  nholdout = length(holdout)
-  avg = mean(train)
+iid_fc <- function(train, holdout, iprint = FALSE) {
+  nholdout <- length(holdout)
+  avg <- mean(train)
   
-  mse = 0
-  fc_vec = rep(NA, nholdout)
+  mse <- 0
+  fc_vec <- rep(NA, nholdout)
   
   for (i in 1:nholdout) {
-    yt = holdout[i]
-    fc = avg
-    fc_vec[i] = fc
-    fcerror = yt - fc
-    mse = mse + fcerror^2
+    yt <- holdout[i]
+    fc <- avg
+    fc_vec[i] <- fc
+    fcerror <- yt - fc
+    mse <- mse + fcerror^2
   }
   
-  rmse = sqrt(mse / nholdout)
+  rmse <- sqrt(mse / nholdout)
   return(list(fc = fc_vec, rmse = rmse))
 }
 
