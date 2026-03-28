@@ -1,7 +1,7 @@
 # =========================================================
-# forecast-rules-all.R
-# Stat 443 forecast functions in instructor-style convention
-# Output format: list(fc = fc_vec, rmse = rmse)
+# one_step_model.R
+# Stat 443 one-step-ahead forecast functions (instructor-style convention)
+# Note: Return structures may vary by function; see each function for details.
 # =========================================================
 
 # 1. SIMPLE BASELINE MODELS
