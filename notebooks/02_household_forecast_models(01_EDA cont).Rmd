@@ -1,5 +1,5 @@
 ---
-title: "02_household_forecast_models(01_EDA cont)"
+title: "02_household_forecast_models"
 output:
   pdf_document: default
   html_document: default
