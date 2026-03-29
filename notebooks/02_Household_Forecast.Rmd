@@ -382,7 +382,7 @@ arimax_df <- bind_rows(train_df, test_df) |>
     ldgpdi_lag1 = lag(ldgpdi, 1),
     ldgpdi_lag3 = lag(ldgpdi, 3)
   ) |>
-  drop_na(ldgpdi_lag1, ldgpdi_lag3) # Drop initial rows with NA due to differencing and lagging
+  drop_na(ldgpdi_lag1, ldcpi_lag2, ldgpdi_lag3) # Drop initial rows with NA due to differencing and lagging
 
 arimax_vars <- c("ldgpdi_lag1", "ldcpi_lag2", "ldgpdi_lag3")
 
