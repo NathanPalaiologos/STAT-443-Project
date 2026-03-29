@@ -16,7 +16,7 @@ library(tseries)
 
 ### Load the Harmonized Data and a First Glimpse
 ```{r data loading, include=TRUE}
-macro_df <- read_csv("../data/macro_panel_wide_raw.csv", show_col_types = FALSE) |>
+macro_df <- read_csv("data/macro_panel_wide_raw.csv", show_col_types = FALSE) |>
   mutate(quarterly_date = as.Date(quarterly_date)) |>
   mutate(household_consumption_pc = household_consumption / population * 1000000,
          gross_domestic_income_pc = gross_domestic_income / population * 1000000,
@@ -253,9 +253,9 @@ p3 <- ggplot(eda_df, aes(x = date, y = ldgdi*100)) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   theme_minimal() +
   labs(
-    title = "Log GDI change (%)",
+    title = "Log GDI quarter-over-quarter change (%)",
     x = "Quarter",
-    y = "YoY % change (log)"
+    y = "QoQ % change (log)"
   )
 
 p1
@@ -274,9 +274,10 @@ eda_df <- eda_df |>
     dnat_rate = nat_rate - lag(nat_rate),
     dunemp = unemp - lag(unemp),
     dinterest = interest - lag(interest),
-    ldcons = log1p(cons) - log1p(lag(cons)),
-    ldcpi = log1p(cpi) - log1p(lag(cpi)),
-    ldgpdi = log1p(gpdi) - log1p(lag(gpdi))
+    # Use standard log differences for growth-style transformations.
+    ldcons = log(cons) - log(lag(cons)),
+    ldcpi = log(cpi) - log(lag(cpi)),
+    ldgpdi = log(gpdi) - log(lag(gpdi))
   )
 
 summary(select(
@@ -366,6 +367,7 @@ plot(corp_ts, main = "Corporate net savings")
 plot(dcorp_ts, main = "First difference: corporate net savings")
 acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate savings")
 pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate savings")
+par(mfrow = c(1, 1))
 
 # ADF test
 adf.test(na.omit(dcorp_ts))
@@ -385,6 +387,7 @@ plot(hh_rate_ts, main = "Household net saving rate")
 plot(dhh_rate_ts, main = "First difference: household net saving rate")
 acf(na.omit(dhh_rate_ts), lag.max = 20, main = "ACF: diff household saving rate")
 pacf(na.omit(dhh_rate_ts), lag.max = 20, main = "PACF: diff household saving rate")
+par(mfrow = c(1, 1))
 
 # ADF test
 adf.test(na.omit(dhh_rate_ts))
@@ -400,8 +403,7 @@ ccf(na.omit(eda_df$dhh), na.omit(eda_df$dcorp),
 ```
 
 
-```{r Lead-lag checks with GDI, unemployment, and consumptions}
-options(repr.plot.width = 12, repr.plot.height = 8)
+```{r lead-lag-dhh-dcorp-macro}
 par(
   mfrow = c(2, 4),
   mar = c(5, 5, 3, 1),   # c(bottom, left, top, right)
@@ -434,7 +436,7 @@ ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dcorp),
 ```
 
 
-```{r Lead-lag checks with GDI, unemployment, and consumptions}
+```{r lead-lag-dhh-rate-macro}
 #| fig.width: 7
 #| fig.height: 2.5
 par(
@@ -457,7 +459,7 @@ par(mfrow = c(1, 1))
 ```
 From the above, we see the following:
 
-- Both househould and corporate net saving rates show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
+- Both household and corporate net saving rates show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
 - Lead lag patterns between household and corporate net saving change is strong, with household net saving change leading corporate net saving change by 1-2 quarters, which is consistent with the idea that household savings behavior may influence corporate savings decisions through demand channels.
 
 ```{r Simple scatterplot matrix}
