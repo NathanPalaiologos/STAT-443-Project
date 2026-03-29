@@ -202,9 +202,16 @@ arima_tbl <- tibble(
 arima_tbl
 ```
 ```{r Add the best ARIMA}
-rmse_tbl <- add_row(rmse_tbl, Model = "ARIMA(1,1,1)", RMSE = min(arima_tbl$RMSE))
-
-fc_store$`ARIMA(1,1,1)` <- fit_arima_111$fc
+arima_fcs <- list(
+  "ARIMA(1,1,1)" = fit_arima_111$fc,
+  "ARIMA(0,1,1)" = fit_arima_011$fc,
+  "ARIMA(2,1,0)" = fit_arima_210$fc,
+  "ARIMA(1,1,0)" = fit_arima_110$fc
+)
+best_arima_idx   <- which.min(arima_tbl$RMSE)
+best_arima_label <- arima_tbl$Model[best_arima_idx]
+rmse_tbl <- add_row(rmse_tbl, Model = best_arima_label, RMSE = arima_tbl$RMSE[best_arima_idx])
+fc_store[[best_arima_label]] <- arima_fcs[[best_arima_label]]
 ```
 
 ```{r Auto SARIMA}
@@ -313,9 +320,20 @@ sarima_tbl
 ```
 
 ```{r Store the best SARIMA}
-rmse_tbl <- add_row(rmse_tbl, Model = "SARIMA(1,1,1)(1,0,0)[4]", 
-                    RMSE = min(sarima_tbl$RMSE))
-fc_store$`SARIMA(1,1,1)(1,0,0)[4]` <- fit_sarima_111_100$fc
+sarima_fcs <- list(
+  "SARIMA(1,1,1)(1,0,0)[4]" = fit_sarima_111_100$fc,
+  "SARIMA(0,1,1)(1,0,0)[4]" = fit_sarima_011_100$fc,
+  "SARIMA(1,1,1)(1,0,1)[4]" = fit_sarima_111_101$fc,
+  "SARIMA(0,1,1)(1,0,1)[4]" = fit_sarima_011_101$fc,
+  "SARIMA(1,1,1)(0,0,1)[4]" = fit_sarima_111_001$fc,
+  "SARIMA(0,1,1)(0,0,1)[4]" = fit_sarima_011_001$fc,
+  "SARIMA(1,1,1)(0,0,2)[4]" = fit_sarima_111_002$fc,
+  "SARIMA(0,1,1)(0,0,2)[4]" = fit_sarima_011_002$fc
+)
+best_sarima_idx   <- which.min(sarima_tbl$RMSE)
+best_sarima_label <- sarima_tbl$Model[best_sarima_idx]
+rmse_tbl <- add_row(rmse_tbl, Model = best_sarima_label, RMSE = sarima_tbl$RMSE[best_sarima_idx])
+fc_store[[best_sarima_label]] <- sarima_fcs[[best_sarima_label]]
 ```
 
 ## ARIMAX One-Step Forecast
@@ -601,9 +619,16 @@ pim_tbl
 ```
 
 ```{r Store the best PIM ARIMAX}
-rmse_tbl <- add_row(rmse_tbl, Model = "PIM ARIMAX(0,1,2)",
-                    RMSE = min(pim_tbl$RMSE))
-fc_store$`PIM ARIMAX(0,1,2)` <- pim_012$fc
+pim_fcs <- list(
+  "PIM ARIMAX(1,1,1)" = pim_111$fc,
+  "PIM ARIMAX(0,1,1)" = pim_011$fc,
+  "PIM ARIMAX(1,1,0)" = pim_110$fc,
+  "PIM ARIMAX(0,1,2)" = pim_012$fc
+)
+best_pim_idx   <- which.min(pim_tbl$RMSE)
+best_pim_label <- pim_tbl$Model[best_pim_idx]
+rmse_tbl <- add_row(rmse_tbl, Model = best_pim_label, RMSE = pim_tbl$RMSE[best_pim_idx])
+fc_store[[best_pim_label]] <- pim_fcs[[best_pim_label]]
 ```
 
 ## RMSE Ranking
@@ -634,9 +659,9 @@ fc_long <- fc_df |>
   filter(
     Model %in% c("Actual", "Average", "Persistence", 
                  "HW Additive", 
-                 "ARIMA(1,1,1)", 
-                 "SARIMA(1,1,1)(1,0,0)[4]",
-                 "PIM ARIMAX(0,1,2)")
+                 best_arima_label, 
+                 best_sarima_label,
+                 best_pim_label)
   ) # Keep only benchmarks and the best HW and ARIMA/SARIMA models for clarity
 
 ggplot(fc_long, aes(x = date, y = value, color = Model, linetype = Model)) +
