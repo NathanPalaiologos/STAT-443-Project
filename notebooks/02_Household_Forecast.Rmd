@@ -1,0 +1,659 @@
+---
+title: "02_Household_Forecast"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(knitr)
+library(tidyverse)
+library(forecast)
+library(lubridate)
+library(ggplot2)
+library(tseries)
+```
+
+```{r source helpers}
+source("../utils/one_step_model.R")
+```
+
+## Load Data
+
+We use the train/test splits and differenced training data saved from the EDA notebook directly.
+
+```{r load data}
+train_df   <- readRDS("../output/train_df.rds")
+test_df    <- readRDS("../output/test_df.rds")
+macro_diff <- readRDS("../output/macro_df_diff.rds")
+
+hh_train <- ts(train_df$hh_save, start = c(1977, 1), frequency = 4)
+hh_test  <- ts(test_df$hh_save,  start = c(2015, 1), frequency = 4)
+```
+
+## ARIMA Order Identification
+
+```{r ACF PACF of hh_save, fig.width=8, fig.height=6}
+
+dhh_train <- diff(hh_train)
+
+par(mfrow = c(2, 2))
+acf(hh_train, lag.max = 20, main = "ACF: hh_save")
+pacf(hh_train, lag.max = 20, main = "PACF: hh_save")
+acf(dhh_train, lag.max = 20, main = "ACF: dhh")
+pacf(dhh_train, lag.max = 20, main = "PACF: dhh")
+par(mfrow = c(1, 1))
+```
+
+- The ACF of `hh_save` decays slowly, confirming non-stationarity and the need for differencing.
+- After differencing, the ACF/PACF of `dhh` guides the choice of $p$ and $q$ for ARIMA.
+- The candidate models we are considering are
+  - ARIMA(1, 1, 1), ARIMA(0, 1, 1), ARIMA(2,1,0)
+  - SARIMA(1, 1, 1)(1, 0, 0)[4], SARIMA(1, 1, 1)(0, 0, 1)[4], etc.
+
+## One-Step Benchmark Models
+
+All benchmarks forecast `hh_save` at level directly.
+
+#### IID (Average Forecasts)
+
+```{r IID}
+rmse_tbl <- tibble(Model = character(), RMSE = double())
+fc_store <- list()
+
+# Average
+res <- iid_fc(hh_train, hh_test)
+rmse_tbl <- add_row(rmse_tbl, Model = "Average", RMSE = res$rmse)
+fc_store$Average <- res$fc
+
+print(res$rmse)
+```
+
+```{r IID by year}
+# Average by Year
+res <- iidbyyear_fc(hh_train, hh_test, periodicity = 4)
+rmse_tbl <- add_row(rmse_tbl, Model = "Average by Year", RMSE = res$rmse)
+fc_store$`Average by Year` <- res$fc
+print(res$rmse)
+```
+
+```{r IID by period}
+# Average by Period
+res <- iidbyperiod_fc(hh_train, hh_test, periodicity = 4)
+rmse_tbl <- add_row(rmse_tbl, Model = "Average by Period", RMSE = res$rmse)
+fc_store$`Average by Period` <- res$fc
+print(res$rmse)
+```
+
+### Persistence
+
+```{r Persistence}
+# Persistence forecast
+res <- persist_fc(hh_train, hh_test)
+rmse_tbl <- add_row(rmse_tbl, Model = "Persistence", RMSE = res$rmse)
+fc_store$Persistence <- res$fc
+
+print(res$rmse)
+```
+
+## Holt-Winters Variants
+
+### SES
+
+```{r Simple exponential smoothing}
+# Simple Exponential Smoothing (SES)
+hw_ses <- HoltWinters(hh_train, beta = FALSE, gamma = FALSE)
+res <- esm_fc(hh_train, hh_test,
+              alpha = hw_ses$alpha,
+              level = as.numeric(hw_ses$coefficients[1]))
+rmse_tbl <- add_row(rmse_tbl, Model = "SES", RMSE = res$rmse)
+fc_store$SES <- res$fc
+
+print(res$rmse)
+```
+
+### Holt Linear
+
+```{r Holt linear}
+hw_holt <- HoltWinters(hh_train, gamma = FALSE)
+res <- lholt_fc(hh_train, hh_test,
+                alpha = hw_holt$alpha,
+                beta  = hw_holt$beta,
+                level = as.numeric(hw_holt$coefficients[1]),
+                slope = as.numeric(hw_holt$coefficients[2]))
+rmse_tbl <- add_row(rmse_tbl, Model = "Holt Linear", RMSE = res$rmse)
+fc_store$`Holt Linear` <- res$fc
+
+print(res$rmse)
+```
+
+### Holt-Winters Seasonal Additive
+
+```{r Holt-Winters additive}
+hw_add <- HoltWinters(hh_train, seasonal = "additive")
+res <- aseason_fc(hh_train, hh_test,
+                  alpha  = hw_add$alpha,
+                  beta   = hw_add$beta,
+                  gamma  = hw_add$gamma,
+                  level  = as.numeric(hw_add$coefficients[1]),
+                  slope  = as.numeric(hw_add$coefficients[2]),
+                  season = as.numeric(hw_add$coefficients[3:6]))
+                  
+rmse_tbl <- add_row(rmse_tbl, Model = "HW Additive", RMSE = res$rmse)
+fc_store$`HW Additive` <- res$fc
+
+print(res$rmse)
+```
+
+## ARIMA One-Step Forecast
+
+```{r ARIMA one-step forecast}
+# Safely extract ARIMA order
+extract_order <- function(ord, keys, default = 0L) {
+  vals <- ord[keys]
+  vals[is.na(vals)] <- default
+  as.integer(vals)
+}
+
+fit_arima <- auto.arima(hh_train,
+                        seasonal = TRUE,
+                        stepwise = FALSE,
+                        approximation = FALSE)
+# Print Auto ARIMA summary                   
+summary(fit_arima)
+```
+
+```{r Alternative ARIMA specifications}
+# Try alternative ARIMA specifications to check robustness of order selection
+fit_arima_111 <- arima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  include.mean = TRUE
+)
+
+fit_arima_011 <- arima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  include.mean = TRUE
+)
+
+fit_arima_210 <- arima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(2, 1, 0),
+  include.mean = TRUE
+)
+
+fit_arima_110 <- arima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 0),
+  include.mean = TRUE
+)
+
+arima_tbl <- tibble(
+  Model = c("ARIMA(1,1,1)", "ARIMA(0,1,1)", "ARIMA(2,1,0)", "ARIMA(1,1,0)"),
+  RMSE = c(fit_arima_111$rmse, fit_arima_011$rmse, 
+           fit_arima_210$rmse, fit_arima_110$rmse)
+)
+
+arima_tbl
+```
+```{r Add the best ARIMA}
+rmse_tbl <- add_row(rmse_tbl, Model = "ARIMA(1,1,1)", RMSE = min(arima_tbl$RMSE))
+
+fc_store$`ARIMA(1,1,1)` <- fit_arima_111$fc
+```
+
+```{r Auto SARIMA}
+ord <- forecast::arimaorder(fit_arima)
+res <- sarima_one_step_fc(
+  train    = hh_train,
+  holdout  = hh_test,
+  order    = extract_order(ord, c("p", "d", "q")),
+  seasonal = extract_order(ord, c("P", "D", "Q")),
+  include.mean = TRUE
+)
+rmse_tbl <- add_row(rmse_tbl, Model = "Auto ARIMA", RMSE = res$rmse)
+fc_store$`Auto ARIMA` <- res$fc
+print(res$rmse)
+```
+
+```{r Try alternative SARIMA specifications}
+fit_sarima_111_100 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  seasonal = c(1, 0, 0),
+  include.mean = TRUE
+)
+
+fit_sarima_011_100 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  seasonal = c(1, 0, 0),
+  include.mean = TRUE
+)
+
+fit_sarima_111_101 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  seasonal = c(1, 0, 1),
+  include.mean = TRUE
+)
+
+fit_sarima_011_101 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  seasonal = c(1, 0, 1),
+  include.mean = TRUE
+)
+
+fit_sarima_111_001 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  seasonal = c(0, 0, 1),
+  include.mean = TRUE
+)
+
+fit_sarima_011_001 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  seasonal = c(0, 0, 1),
+  include.mean = TRUE
+)
+
+fit_sarima_111_002 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  seasonal = c(0, 0, 2),
+  include.mean = TRUE
+)
+
+fit_sarima_011_002 <- sarima_one_step_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  seasonal = c(0, 0, 2),
+  include.mean = TRUE
+)
+
+sarima_tbl <- tibble(
+  Model = c(
+    "SARIMA(1,1,1)(1,0,0)[4]",
+    "SARIMA(0,1,1)(1,0,0)[4]",
+    "SARIMA(1,1,1)(1,0,1)[4]",
+    "SARIMA(0,1,1)(1,0,1)[4]",
+    "SARIMA(1,1,1)(0,0,1)[4]",
+    "SARIMA(0,1,1)(0,0,1)[4]",
+    "SARIMA(1,1,1)(0,0,2)[4]",
+    "SARIMA(0,1,1)(0,0,2)[4]"
+  ),
+  RMSE = c(
+    fit_sarima_111_100$rmse,
+    fit_sarima_011_100$rmse,
+    fit_sarima_111_101$rmse,
+    fit_sarima_011_101$rmse,
+    fit_sarima_111_001$rmse,
+    fit_sarima_011_001$rmse,
+    fit_sarima_111_002$rmse,
+    fit_sarima_011_002$rmse
+  )
+)
+
+sarima_tbl
+```
+
+```{r Store the best SARIMA}
+rmse_tbl <- add_row(rmse_tbl, Model = "SARIMA(1,1,1)(1,0,0)[4]", 
+                    RMSE = min(sarima_tbl$RMSE))
+fc_store$`SARIMA(1,1,1)(1,0,0)[4]` <- fit_sarima_111_100$fc
+```
+
+## ARIMAX One-Step Forecast
+
+### Exogenous Variable Selection via CCF
+
+We use the differenced training data from the EDA to inspect cross-correlations with `dhh`. A variable is selected for ARIMAX only if it shows significant correlation at **negative lags** (the regressor leads `dhh`), to avoid overfitting with only 20 holdout observations.
+
+```{r CCF variable selection, fig.width=10, fig.height=6}
+candidates <- c("dcorp", "ldgdi", "ldcons", "dunemp", "dinterest", "ldcpi", "ldgpdi")
+
+par(
+  mfrow = c(2, 4),
+  mar = c(5, 5, 3, 1),
+  mgp = c(2, 0.8, 0),
+  cex.main = 0.95,
+  cex.lab = 0.9,
+  cex.axis = 0.85
+)
+for (v in candidates) {
+  ccf(na.omit(macro_diff[[v]]), na.omit(macro_diff$dhh),
+      lag.max = 16,
+      main = paste(v, "vs dhh"))
+}
+par(mfrow = c(1, 1))
+```
+
+```{r CCF values}
+ccf_values <- sapply(candidates, function(v) {
+  ccf_res <- ccf(na.omit(macro_diff[[v]]), na.omit(macro_diff$dhh), lag.max = 16, plot = FALSE)
+  max_ccf <- max(abs(ccf_res$acf[ccf_res$lag < 0]))
+  return(max_ccf)
+})
+
+# Identify the lag with the maximum absolute CCF for each candidate
+ccf_lags <- sapply(candidates, function(v) {
+  ccf_res <- ccf(na.omit(macro_diff[[v]]), na.omit(macro_diff$dhh), lag.max = 16, plot = FALSE)
+  max_idx <- which.max(abs(ccf_res$acf[ccf_res$lag < 0]))
+  return(ccf_res$lag[max_idx])
+})
+
+ccf_tbl <- tibble(
+  Variable = candidates,
+  Max_CCF = ccf_values,
+  Lag_at_Max_CCF = ccf_lags
+)
+
+ccf_tbl
+```
+
+Based on the CCF evidence and the EDA findings, we select regressors with clear leading relationship:
+
+- `ldgpdi`
+- `ldcpi`
+
+```{r ARIMAX preprocessing}
+# Compute stationary exogenous variables across the full sample
+arimax_df <- bind_rows(train_df, test_df) |>
+  arrange(date) |>
+  mutate(
+    ldgpdi  = log(gpdi) - log(lag(gpdi)),
+    ldcpi = log1p(cpi) - log1p(lag(cpi)),
+    ldcpi_lag2 = lag(ldcpi, 2),
+    ldgpdi_lag1 = lag(ldgpdi, 1),
+    ldgpdi_lag3 = lag(ldgpdi, 3)
+  ) |>
+  drop_na(ldgpdi_lag1, ldgpdi_lag3) # Drop initial rows with NA due to differencing and lagging
+
+arimax_vars <- c("ldgpdi_lag1", "ldcpi_lag2", "ldgpdi_lag3")
+
+x_train <- arimax_df |> filter(date <= as.Date("2014-12-31")) |>
+  select(all_of(arimax_vars)) |>
+  as.matrix()
+x_test <- arimax_df |> filter(date > as.Date("2014-12-31")) |>
+  select(all_of(arimax_vars)) |>
+  as.matrix()
+```
+
+### Fitting ARIMAX models
+
+```{r ARIMAX one-step forecast}
+
+# Align hh_save accordingly
+hh_train_x <- ts(
+  arimax_df |> filter(date <= as.Date("2014-12-31")) |> pull(hh_save),
+  start = c(
+    year(min(arimax_df$date)),
+    quarter(min(arimax_df$date))
+  ), frequency = 4
+)
+
+# Fit ARIMAX with selected regressors
+fit_arimax <- auto.arima(hh_train_x,
+                         xreg = x_train,
+                         seasonal = FALSE,
+                         stepwise = FALSE,
+                         approximation = FALSE)
+summary(fit_arimax)
+```
+
+```{r ARIMAX forecast}
+arimax_213 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(2, 1, 3),
+  xreg_train = x_train,
+  xreg_holdout = x_test,
+  include.mean = TRUE
+)
+
+arimax_212 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(2, 1, 2),
+  xreg_train = x_train,
+  xreg_holdout = x_test,
+  include.mean = TRUE
+)
+
+arimax_112 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 2),
+  xreg_train = x_train,
+  xreg_holdout = x_test,
+  include.mean = TRUE
+)
+
+arimax_111 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  xreg_train = x_train,
+  xreg_holdout = x_test,
+  include.mean = TRUE
+)
+
+arimax_011 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  xreg_train = x_train,
+  xreg_holdout = x_test,
+  include.mean = TRUE
+)
+
+arimax_tbl <- tibble(
+  Model = c(
+    "ARIMAX(2,1,3)",
+    "ARIMAX(2,1,2)",
+    "ARIMAX(1,1,2)",
+    "ARIMAX(1,1,1)",
+    "ARIMAX(0,1,1)"
+  ),
+  RMSE = c(
+    arimax_213$rmse,
+    arimax_212$rmse,
+    arimax_112$rmse,
+    arimax_111$rmse,
+    arimax_011$rmse
+  )
+)
+
+arimax_tbl
+```
+
+## Theoretical Model (Precautionary Saving)
+
+In Macroeconomics, the precautionary saving motive is modeled by the permanent income model. Where, assuming a representative household is constant relative risk averse, we have:
+$$
+C_t^{-\gamma} = \beta\mathbb{E}_t[(1+r_{t+1})C_{t+1}] 
+$$
+where $C_t$ is consumption, $\beta$ is the discount factor, $\gamma$ is the coefficient of relative risk aversion, and $r_{t+1}$ is the real interest rate. This implies that consumption growth depends on expected returns and the intertemporal elasticity of substitution.
+
+Taking the log-transformation and Taylor expansion will eventually give us
+$$
+c_t = c_{t+1} - \frac{1}{\gamma} \ln \beta - \frac{1}{\gamma} r_{t+1}  - \frac{\gamma}{2} \text{Var}_t(\Delta c_{t+1}) - \varepsilon_{t+1}
+$$
+Where with the identity $s_t = y_t - c_t$ , the first difference of saving is captured by
+$$
+\Delta s_t = \Delta y_t - \Delta\mathbb{E}_t[c_{t+1}] + \frac{1}{\gamma}\Delta r_{t+1} + \frac{\gamma}{2} \Delta\text{Var}_t(\Delta c_{t+1}) + \varepsilon_{t+1}
+$$
+This suggests we can fit the following empirical model
+$$
+dhh_t = \alpha + \sum_{i=0}^p \phi_i dhh_{t-i} + \beta_1 dinterest_{t-1} + \beta_2 dunemp_{t-1} + \beta_3 ldgdi_{t-1} + \beta_4 ldgpdi_{t-1} + \varepsilon_t
+$$
+Where we use the unemployment and Gross Private Domestic Investment (GPDI) as proxies for uncertainty, and the real interest rate as the return variable. We lag all regressors by 1 quarter to avoid look-ahead bias in forecasting.
+
+```{r Rainy day forecast}
+pim_df <- bind_rows(train_df, test_df) |>
+  arrange(date) |>
+  mutate(
+    dinterest = interest - lag(interest),
+    dunemp = unemp - lag(unemp),
+    ldgdi = log(gdi) - log(lag(gdi)),
+    ldgpdi = log(gpdi) - log(lag(gpdi)),
+    dinterest_lag1 = lag(dinterest, 1),
+    dunemp_lag1 = lag(dunemp, 1),
+    ldgdi_lag1 = lag(ldgdi, 1),
+    ldgpdi_lag1 = lag(ldgpdi, 1)
+  ) |>
+  drop_na(ldgdi_lag1)
+
+pim_train <- pim_df |> filter(date <= as.Date("2014-12-31"))|>
+  select(dinterest_lag1, dunemp_lag1, ldgdi_lag1, ldgpdi_lag1)|>
+  as.matrix()
+pim_test <- pim_df |> filter(date > as.Date("2014-12-31"))|>
+  select(dinterest_lag1, dunemp_lag1, ldgdi_lag1, ldgpdi_lag1)|>
+  as.matrix()
+
+hh_train_x <- ts(
+  pim_df |> filter(date <= as.Date("2014-12-31"))|>pull(hh_save),
+  start = c(
+    year(min(pim_df$date)),
+    quarter(min(pim_df$date))
+  ), 
+  frequency = 4
+)
+```
+
+```{r Fit the rainy day model}
+pim_fit <- auto.arima(hh_train_x, 
+                      xreg = pim_train,
+                      seasonal = FALSE,
+                      stepwise = FALSE,
+                      approximation = FALSE)
+pim_fit
+```
+```{r Test alternatives}
+pim_111 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  xreg_train = pim_train,
+  xreg_holdout = pim_test,
+  include.mean = TRUE
+)
+
+pim_011 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  xreg_train = pim_train,
+  xreg_holdout = pim_test,
+  include.mean = TRUE
+)
+
+
+pim_110 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 0),
+  xreg_train = pim_train,
+  xreg_holdout = pim_test,
+  include.mean = TRUE
+)
+
+pim_012 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(0, 1, 2),
+  xreg_train = pim_train,
+  xreg_holdout = pim_test,
+  include.mean = TRUE
+)
+
+pim_tbl <- tibble(
+  Model = c(
+    "PIM ARIMAX(1,1,1)",
+    "PIM ARIMAX(0,1,1)",
+    "PIM ARIMAX(1,1,0)",
+    "PIM ARIMAX(0,1,2)"
+  ),
+  RMSE = c(
+    pim_111$rmse,
+    pim_011$rmse,
+    pim_110$rmse,
+    pim_012$rmse
+  )
+)
+
+pim_tbl
+```
+
+```{r Store the best PIM ARIMAX}
+rmse_tbl <- add_row(rmse_tbl, Model = "PIM ARIMAX(0,1,2)",
+                    RMSE = min(pim_tbl$RMSE))
+fc_store$`PIM ARIMAX(0,1,2)` <- pim_012$fc
+```
+
+## RMSE Ranking
+
+```{r RMSE ranking}
+rmse_tbl <- rmse_tbl |>
+  mutate(RMSE = round(RMSE, 4)) |>
+  arrange(RMSE)
+
+rmse_tbl
+
+best_model <- rmse_tbl$Model[1]
+cat("Best model by one-step holdout RMSE:", best_model, "\n")
+```
+
+## Holdout Visualization
+
+```{r holdout forecast plot, fig.width=10, fig.height=6}
+fc_df <- tibble(date = test_df$date, Actual = as.numeric(hh_test))
+
+
+for (m in names(fc_store)) {
+  fc_df[[m]] <- as.numeric(fc_store[[m]])
+}
+
+fc_long <- fc_df |>
+  pivot_longer(cols = -date, names_to = "Model", values_to = "value")|>
+  filter(
+    Model %in% c("Actual", "Average", "Persistence", 
+                 "HW Additive", 
+                 "ARIMA(1,1,1)", 
+                 "SARIMA(1,1,1)(1,0,0)[4]",
+                 "PIM ARIMAX(0,1,2)")
+  ) # Keep only benchmarks and the best HW and ARIMA/SARIMA models for clarity
+
+ggplot(fc_long, aes(x = date, y = value, color = Model, linetype = Model)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "One-step-ahead holdout forecasts of household net savings",
+    x = "Quarter",
+    y = "Household net savings",
+    color = "Model",
+    linetype = "Model"
+  )
+```
+
+## Interpretation
+
+- All benchmarks and ARIMA/ARIMAX models forecast `hh_save` directly; differencing is handled internally by `auto.arima` via the $d$ parameter.
+- The ARIMAX uses only CCF-justified regressors (`r paste(arimax_vars, collapse = ", ")`) to avoid overfitting the small holdout window.
+- The RMSE ranking table determines the best model for household net savings forecasting.
