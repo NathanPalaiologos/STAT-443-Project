@@ -1,6 +1,8 @@
 ---
 title: "02_Household_Forecast"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup}
@@ -195,6 +197,8 @@ fit_arima_110 <- arima_one_step_fc(
 
 arima_tbl <- tibble(
   Model = c("ARIMA(1,1,1)", "ARIMA(0,1,1)", "ARIMA(2,1,0)", "ARIMA(1,1,0)"),
+  AIC = round(c(fit_arima_111$fit$aic, fit_arima_011$fit$aic, 
+                fit_arima_210$fit$aic, fit_arima_110$fit$aic), 2),
   RMSE = c(fit_arima_111$rmse, fit_arima_011$rmse, 
            fit_arima_210$rmse, fit_arima_110$rmse)
 )
@@ -208,11 +212,27 @@ arima_fcs <- list(
   "ARIMA(2,1,0)" = fit_arima_210$fc,
   "ARIMA(1,1,0)" = fit_arima_110$fc
 )
+arima_fits <- list(
+  "ARIMA(1,1,1)" = fit_arima_111$fit,
+  "ARIMA(0,1,1)" = fit_arima_011$fit,
+  "ARIMA(2,1,0)" = fit_arima_210$fit,
+  "ARIMA(1,1,0)" = fit_arima_110$fit
+)
 best_arima_idx   <- which.min(arima_tbl$RMSE)
 best_arima_label <- arima_tbl$Model[best_arima_idx]
 rmse_tbl <- add_row(rmse_tbl, Model = best_arima_label, RMSE = arima_tbl$RMSE[best_arima_idx])
 fc_store[[best_arima_label]] <- arima_fcs[[best_arima_label]]
 ```
+
+### ARIMA Residual Diagnostics
+
+```{r ARIMA residual diagnostics, fig.width=10, fig.height=6}
+best_arima_fit <- arima_fits[[best_arima_label]]
+cat("Best ARIMA:", best_arima_label, "| AIC:", round(best_arima_fit$aic, 2), "\n")
+forecast::checkresiduals(best_arima_fit)
+```
+
+The `checkresiduals()` function displays: (1) a time plot of residuals, (2) the ACF of residuals, (3) a histogram of residuals, and (4) a Ljung-Box test. If the residuals resemble white noise (no significant ACF spikes, roughly normal distribution, Ljung-Box p-value > 0.05), the ARIMA specification is adequate.
 
 ```{r Auto SARIMA}
 ord <- forecast::arimaorder(fit_arima)
@@ -304,6 +324,16 @@ sarima_tbl <- tibble(
     "SARIMA(1,1,1)(0,0,2)[4]",
     "SARIMA(0,1,1)(0,0,2)[4]"
   ),
+  AIC = round(c(
+    fit_sarima_111_100$fit$aic,
+    fit_sarima_011_100$fit$aic,
+    fit_sarima_111_101$fit$aic,
+    fit_sarima_011_101$fit$aic,
+    fit_sarima_111_001$fit$aic,
+    fit_sarima_011_001$fit$aic,
+    fit_sarima_111_002$fit$aic,
+    fit_sarima_011_002$fit$aic
+  ), 2),
   RMSE = c(
     fit_sarima_111_100$rmse,
     fit_sarima_011_100$rmse,
@@ -330,10 +360,28 @@ sarima_fcs <- list(
   "SARIMA(1,1,1)(0,0,2)[4]" = fit_sarima_111_002$fc,
   "SARIMA(0,1,1)(0,0,2)[4]" = fit_sarima_011_002$fc
 )
+sarima_fits <- list(
+  "SARIMA(1,1,1)(1,0,0)[4]" = fit_sarima_111_100$fit,
+  "SARIMA(0,1,1)(1,0,0)[4]" = fit_sarima_011_100$fit,
+  "SARIMA(1,1,1)(1,0,1)[4]" = fit_sarima_111_101$fit,
+  "SARIMA(0,1,1)(1,0,1)[4]" = fit_sarima_011_101$fit,
+  "SARIMA(1,1,1)(0,0,1)[4]" = fit_sarima_111_001$fit,
+  "SARIMA(0,1,1)(0,0,1)[4]" = fit_sarima_011_001$fit,
+  "SARIMA(1,1,1)(0,0,2)[4]" = fit_sarima_111_002$fit,
+  "SARIMA(0,1,1)(0,0,2)[4]" = fit_sarima_011_002$fit
+)
 best_sarima_idx   <- which.min(sarima_tbl$RMSE)
 best_sarima_label <- sarima_tbl$Model[best_sarima_idx]
 rmse_tbl <- add_row(rmse_tbl, Model = best_sarima_label, RMSE = sarima_tbl$RMSE[best_sarima_idx])
 fc_store[[best_sarima_label]] <- sarima_fcs[[best_sarima_label]]
+```
+
+### SARIMA Residual Diagnostics
+
+```{r SARIMA residual diagnostics, fig.width=10, fig.height=6}
+best_sarima_fit <- sarima_fits[[best_sarima_label]]
+cat("Best SARIMA:", best_sarima_label, "| AIC:", round(best_sarima_fit$aic, 2), "\n")
+forecast::checkresiduals(best_sarima_fit)
 ```
 
 ## ARIMAX One-Step Forecast
@@ -488,6 +536,13 @@ arimax_tbl <- tibble(
     "ARIMAX(1,1,1)",
     "ARIMAX(0,1,1)"
   ),
+  AIC = round(c(
+    arimax_213$fit$aic,
+    arimax_212$fit$aic,
+    arimax_112$fit$aic,
+    arimax_111$fit$aic,
+    arimax_011$fit$aic
+  ), 2),
   RMSE = c(
     arimax_213$rmse,
     arimax_212$rmse,
@@ -498,6 +553,35 @@ arimax_tbl <- tibble(
 )
 
 arimax_tbl
+```
+
+```{r Store the best ARIMAX}
+arimax_fcs <- list(
+  "ARIMAX(2,1,3)" = arimax_213$fc,
+  "ARIMAX(2,1,2)" = arimax_212$fc,
+  "ARIMAX(1,1,2)" = arimax_112$fc,
+  "ARIMAX(1,1,1)" = arimax_111$fc,
+  "ARIMAX(0,1,1)" = arimax_011$fc
+)
+arimax_fits <- list(
+  "ARIMAX(2,1,3)" = arimax_213$fit,
+  "ARIMAX(2,1,2)" = arimax_212$fit,
+  "ARIMAX(1,1,2)" = arimax_112$fit,
+  "ARIMAX(1,1,1)" = arimax_111$fit,
+  "ARIMAX(0,1,1)" = arimax_011$fit
+)
+best_arimax_idx   <- which.min(arimax_tbl$RMSE)
+best_arimax_label <- arimax_tbl$Model[best_arimax_idx]
+rmse_tbl <- add_row(rmse_tbl, Model = best_arimax_label, RMSE = arimax_tbl$RMSE[best_arimax_idx])
+fc_store[[best_arimax_label]] <- arimax_fcs[[best_arimax_label]]
+```
+
+### ARIMAX Residual Diagnostics
+
+```{r ARIMAX residual diagnostics, fig.width=10, fig.height=6}
+best_arimax_fit <- arimax_fits[[best_arimax_label]]
+cat("Best ARIMAX:", best_arimax_label, "| AIC:", round(best_arimax_fit$aic, 2), "\n")
+forecast::checkresiduals(best_arimax_fit)
 ```
 
 ## Theoretical Model (Precautionary Saving)
@@ -607,6 +691,12 @@ pim_tbl <- tibble(
     "PIM ARIMAX(1,1,0)",
     "PIM ARIMAX(0,1,2)"
   ),
+  AIC = round(c(
+    pim_111$fit$aic,
+    pim_011$fit$aic,
+    pim_110$fit$aic,
+    pim_012$fit$aic
+  ), 2),
   RMSE = c(
     pim_111$rmse,
     pim_011$rmse,
@@ -625,10 +715,24 @@ pim_fcs <- list(
   "PIM ARIMAX(1,1,0)" = pim_110$fc,
   "PIM ARIMAX(0,1,2)" = pim_012$fc
 )
+pim_fits <- list(
+  "PIM ARIMAX(1,1,1)" = pim_111$fit,
+  "PIM ARIMAX(0,1,1)" = pim_011$fit,
+  "PIM ARIMAX(1,1,0)" = pim_110$fit,
+  "PIM ARIMAX(0,1,2)" = pim_012$fit
+)
 best_pim_idx   <- which.min(pim_tbl$RMSE)
 best_pim_label <- pim_tbl$Model[best_pim_idx]
 rmse_tbl <- add_row(rmse_tbl, Model = best_pim_label, RMSE = pim_tbl$RMSE[best_pim_idx])
 fc_store[[best_pim_label]] <- pim_fcs[[best_pim_label]]
+```
+
+### PIM ARIMAX Residual Diagnostics
+
+```{r PIM residual diagnostics, fig.width=10, fig.height=6}
+best_pim_fit <- pim_fits[[best_pim_label]]
+cat("Best PIM:", best_pim_label, "| AIC:", round(best_pim_fit$aic, 2), "\n")
+forecast::checkresiduals(best_pim_fit)
 ```
 
 ## RMSE Ranking
@@ -661,6 +765,7 @@ fc_long <- fc_df |>
                  "HW Additive", 
                  best_arima_label, 
                  best_sarima_label,
+                 best_arimax_label,
                  best_pim_label)
   ) # Keep only benchmarks and the best HW and ARIMA/SARIMA models for clarity
 
@@ -682,3 +787,238 @@ ggplot(fc_long, aes(x = date, y = value, color = Model, linetype = Model)) +
 - All benchmarks and ARIMA/ARIMAX models forecast `hh_save` directly; differencing is handled internally by `auto.arima` via the $d$ parameter.
 - The ARIMAX uses only CCF-justified regressors (`r paste(arimax_vars, collapse = ", ")`) to avoid overfitting the small holdout window.
 - The RMSE ranking table determines the best model for household net savings forecasting.
+
+## Expanding Window Backtest
+
+Our one-step-ahead evaluation above uses **fixed-parameter Kalman filtering**: estimate the model once on the training set (1977 Q1 – 2014 Q4), then run the Kalman filter through the holdout while keeping all parameters frozen. This is valid one-step-ahead forecasting — at each holdout time $t$, the forecast $\hat{y}_t$ is conditioned on $y_1, \dots, y_{t-1}$ — but parameter estimates are never updated.
+
+An **expanding window backtest** re-estimates the model at every holdout step:
+
+1. Fit model on $y_1, \dots, y_{T}$; forecast $y_{T+1}$.
+2. Fit model on $y_1, \dots, y_{T+1}$; forecast $y_{T+2}$.
+3. Continue until the end of the holdout.
+
+**Is expanding window less biased?**
+
+- **Yes, in general.** The fixed-parameter approach is equivalent to an expanding window that never updates parameters — it uses the *same* parameter estimates for all 20 holdout quarters. If the true DGP shifts over the holdout (e.g., structural break), stale parameters will systematically misforecast, biasing the RMSE upward. The expanding window adapts, yielding an RMSE that better reflects what a practitioner would achieve in real-time.
+- **Trade-off:** Expanding window can overfit in small samples — each re-estimation uses slightly more data, but for early holdout quarters, the training set is essentially the same. For our 152-quarter training set and 20-quarter holdout, the effect is modest (training size changes from 152 to 171).
+- **Computational cost:** Each model must be re-estimated $h$ times (here $h = 20$), so the expanding window is ~20× slower.
+
+We compare the two approaches for the best ARIMA and SARIMA models below.
+
+```{r Expanding window comparison, fig.width=10, fig.height=5}
+# Parse the best ARIMA order from label
+parse_arima_order <- function(label) {
+  nums <- as.integer(regmatches(label, gregexpr("[0-9]+", label))[[1]])
+  return(nums[1:3])
+}
+
+parse_sarima_orders <- function(label) {
+  nums <- as.integer(regmatches(label, gregexpr("[0-9]+", label))[[1]])
+  list(order = nums[1:3], seasonal = nums[4:6])
+}
+
+# Best ARIMA expanding window
+best_arima_order <- parse_arima_order(best_arima_label)
+ew_arima <- arima_expanding_window_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = best_arima_order,
+  include.mean = TRUE
+)
+
+# Best SARIMA expanding window
+best_sarima_orders <- parse_sarima_orders(best_sarima_label)
+ew_sarima <- sarima_expanding_window_fc(
+  train = hh_train,
+  holdout = hh_test,
+  order = best_sarima_orders$order,
+  seasonal = best_sarima_orders$seasonal,
+  include.mean = TRUE
+)
+
+# Also Persistence expanding window = same as fixed (no parameters to update)
+ew_persist <- persist_fc(hh_train, hh_test)
+
+ew_comparison <- tibble(
+  Model = c("Persistence",
+            paste(best_arima_label, "(fixed)"),
+            paste(best_arima_label, "(expanding)"),
+            paste(best_sarima_label, "(fixed)"),
+            paste(best_sarima_label, "(expanding)")),
+  RMSE = round(c(ew_persist$rmse,
+                  fc_store[[best_arima_label]] |> 
+                    {\(fc) sqrt(mean((as.numeric(hh_test) - fc)^2))}(),
+                  ew_arima$rmse,
+                  fc_store[[best_sarima_label]] |> 
+                    {\(fc) sqrt(mean((as.numeric(hh_test) - fc)^2))}(),
+                  ew_sarima$rmse), 4)
+)
+
+ew_comparison
+```
+
+```{r Expanding window forecast plot, fig.width=10, fig.height=5}
+ew_df <- tibble(
+  date = test_df$date,
+  Actual = as.numeric(hh_test),
+  `Fixed params`    = as.numeric(fc_store[[best_arima_label]]),
+  `Expanding window` = as.numeric(ew_arima$fc)
+) |>
+  pivot_longer(-date, names_to = "Method", values_to = "value")
+
+ggplot(ew_df, aes(x = date, y = value, color = Method, linetype = Method)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  labs(
+    title = paste("Fixed vs expanding window:", best_arima_label),
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+**Takeaway:** For household net savings, the expanding window RMSE and fixed-parameter RMSE are expected to be similar because (a) the training set is already large relative to the holdout, and (b) the series is close to a random walk, so parameter estimates barely change with 1 additional observation. The near-random-walk behaviour means the primary "forecast" is simply the previous value plus noise, and re-estimating parameters adds marginal value. This further supports the conclusion that the series is difficult to forecast.
+
+## Savings Rate Forecasting Experiment
+
+Instead of forecasting `hh_save` in absolute CAD, we test whether forecasting the **household saving rate** (`hh_rate = hh_save / gdi`) yields better results relative to benchmarks. The saving rate is bounded and may exhibit more stable dynamics.
+
+```{r Savings rate train-test split}
+hh_rate_train <- ts(train_df$hh_rate, start = c(1977, 1), frequency = 4)
+hh_rate_test  <- ts(test_df$hh_rate,  start = c(2015, 1), frequency = 4)
+
+cat("Saving rate range (train):", round(range(hh_rate_train), 4), "\n")
+cat("Saving rate range (test):",  round(range(hh_rate_test), 4), "\n")
+```
+
+```{r Savings rate stationarity, fig.width=8, fig.height=6}
+dhh_rate_train <- diff(hh_rate_train)
+
+par(mfrow = c(2, 2))
+acf(hh_rate_train, lag.max = 20,  main = "ACF: hh_rate")
+pacf(hh_rate_train, lag.max = 20, main = "PACF: hh_rate")
+acf(dhh_rate_train, lag.max = 20,  main = "ACF: diff(hh_rate)")
+pacf(dhh_rate_train, lag.max = 20, main = "PACF: diff(hh_rate)")
+par(mfrow = c(1, 1))
+
+cat("ADF test on hh_rate:\n")
+print(adf.test(na.omit(as.numeric(hh_rate_train))))
+cat("\nADF test on diff(hh_rate):\n")
+print(adf.test(na.omit(as.numeric(dhh_rate_train))))
+```
+
+```{r Savings rate benchmarks}
+rate_rmse_tbl <- tibble(Model = character(), RMSE = double())
+
+# Average
+res <- iid_fc(hh_rate_train, hh_rate_test)
+rate_rmse_tbl <- add_row(rate_rmse_tbl, Model = "Average", RMSE = res$rmse)
+
+# Persistence
+res <- persist_fc(hh_rate_train, hh_rate_test)
+rate_rmse_tbl <- add_row(rate_rmse_tbl, Model = "Persistence", RMSE = res$rmse)
+
+# Average by Period
+res <- iidbyperiod_fc(hh_rate_train, hh_rate_test, periodicity = 4)
+rate_rmse_tbl <- add_row(rate_rmse_tbl, Model = "Average by Period", RMSE = res$rmse)
+
+# SES
+hw_ses_rate <- HoltWinters(hh_rate_train, beta = FALSE, gamma = FALSE)
+res <- esm_fc(hh_rate_train, hh_rate_test,
+              alpha = hw_ses_rate$alpha,
+              level = as.numeric(hw_ses_rate$coefficients[1]))
+rate_rmse_tbl <- add_row(rate_rmse_tbl, Model = "SES", RMSE = res$rmse)
+
+# Holt Linear
+hw_holt_rate <- HoltWinters(hh_rate_train, gamma = FALSE)
+res <- lholt_fc(hh_rate_train, hh_rate_test,
+                alpha = hw_holt_rate$alpha,
+                beta  = hw_holt_rate$beta,
+                level = as.numeric(hw_holt_rate$coefficients[1]),
+                slope = as.numeric(hw_holt_rate$coefficients[2]))
+rate_rmse_tbl <- add_row(rate_rmse_tbl, Model = "Holt Linear", RMSE = res$rmse)
+
+cat("Benchmarks and ESM:\n")
+rate_rmse_tbl
+```
+
+```{r Savings rate ARIMA}
+# auto.arima on saving rate
+auto_rate <- auto.arima(hh_rate_train, seasonal = TRUE,
+                        stepwise = FALSE, approximation = FALSE)
+cat("auto.arima for hh_rate:\n")
+summary(auto_rate)
+
+# Test key ARIMA specifications
+rate_arima_011 <- arima_one_step_fc(hh_rate_train, hh_rate_test,
+                                     order = c(0, 1, 1), include.mean = TRUE)
+rate_arima_111 <- arima_one_step_fc(hh_rate_train, hh_rate_test,
+                                     order = c(1, 1, 1), include.mean = TRUE)
+rate_arima_110 <- arima_one_step_fc(hh_rate_train, hh_rate_test,
+                                     order = c(1, 1, 0), include.mean = TRUE)
+rate_arima_210 <- arima_one_step_fc(hh_rate_train, hh_rate_test,
+                                     order = c(2, 1, 0), include.mean = TRUE)
+
+# SARIMA specifications
+rate_sarima_011_002 <- sarima_one_step_fc(hh_rate_train, hh_rate_test,
+                                           order = c(0, 1, 1),
+                                           seasonal = c(0, 0, 2),
+                                           include.mean = TRUE)
+rate_sarima_111_100 <- sarima_one_step_fc(hh_rate_train, hh_rate_test,
+                                           order = c(1, 1, 1),
+                                           seasonal = c(1, 0, 0),
+                                           include.mean = TRUE)
+
+rate_arima_tbl <- tibble(
+  Model = c("ARIMA(0,1,1)", "ARIMA(1,1,1)", "ARIMA(1,1,0)", "ARIMA(2,1,0)",
+            "SARIMA(0,1,1)(0,0,2)[4]", "SARIMA(1,1,1)(1,0,0)[4]"),
+  AIC = round(c(rate_arima_011$fit$aic, rate_arima_111$fit$aic,
+                rate_arima_110$fit$aic, rate_arima_210$fit$aic,
+                rate_sarima_011_002$fit$aic, rate_sarima_111_100$fit$aic), 2),
+  RMSE = round(c(rate_arima_011$rmse, rate_arima_111$rmse,
+                  rate_arima_110$rmse, rate_arima_210$rmse,
+                  rate_sarima_011_002$rmse, rate_sarima_111_100$rmse), 4)
+)
+
+rate_arima_tbl
+```
+
+```{r Savings rate combined RMSE}
+# Add best ARIMA/SARIMA to rate table
+best_rate_idx <- which.min(rate_arima_tbl$RMSE)
+rate_rmse_tbl <- add_row(rate_rmse_tbl,
+                          Model = rate_arima_tbl$Model[best_rate_idx],
+                          RMSE = rate_arima_tbl$RMSE[best_rate_idx])
+
+rate_rmse_tbl <- rate_rmse_tbl |>
+  mutate(RMSE = round(RMSE, 6)) |>
+  arrange(RMSE)
+
+cat("=== Savings Rate RMSE Ranking ===\n")
+rate_rmse_tbl
+
+best_rate_model <- rate_rmse_tbl$Model[1]
+cat("\nBest model for hh_rate:", best_rate_model, "\n")
+cat("Can best model beat Persistence?",
+    ifelse(rate_rmse_tbl$RMSE[rate_rmse_tbl$Model == best_rate_model] <
+           rate_rmse_tbl$RMSE[rate_rmse_tbl$Model == "Persistence"],
+           "YES", "NO"), "\n")
+```
+
+```{r Savings rate residual diagnostics, fig.width=10, fig.height=6}
+# Diagnostics for the best rate ARIMA model
+rate_fits <- list(
+  "ARIMA(0,1,1)" = rate_arima_011$fit,
+  "ARIMA(1,1,1)" = rate_arima_111$fit,
+  "ARIMA(1,1,0)" = rate_arima_110$fit,
+  "ARIMA(2,1,0)" = rate_arima_210$fit,
+  "SARIMA(0,1,1)(0,0,2)[4]" = rate_sarima_011_002$fit,
+  "SARIMA(1,1,1)(1,0,0)[4]" = rate_sarima_111_100$fit
+)
+best_rate_arima_label <- rate_arima_tbl$Model[best_rate_idx]
+cat("Residual diagnostics for", best_rate_arima_label, "on hh_rate:\n")
+forecast::checkresiduals(rate_fits[[best_rate_arima_label]])
+```
+
+### Savings Rate Findings
+
+The saving rate transformation bounds the response to a more interpretable scale and removes the GDI-driven trend. However, the RMSE ranking above reveals whether this re-framing provides any improvement over naïve benchmarks. If the Persistence model still dominates, the saving rate — like the level series — is also effectively a random walk, confirming that the household savings process is dominated by unpredictable shocks regardless of the scale used.
