@@ -507,7 +507,15 @@ arima_one_step_fc <- function(train, holdout, order = c(0,0,0),
   fit_train <- forecast::Arima(train, order = order, include.mean = include.mean)
   
   # Generate the full series by combining train and holdout (for state updates)
-  full_series <- c(train, holdout)
+  # Preserve ts attributes for correct Kalman filter operation
+  if (stats::is.ts(train)) {
+    freq <- stats::frequency(train)
+    st <- stats::start(train)
+    full_series <- stats::ts(c(as.numeric(train), as.numeric(holdout)),
+                             start = st, frequency = freq)
+  } else {
+    full_series <- c(train, holdout)
+  }
   
   fit_full <- forecast::Arima(full_series, model = fit_train)
   
@@ -522,7 +530,7 @@ arima_one_step_fc <- function(train, holdout, order = c(0,0,0),
   fcerror <- yt - fc_vec
   rmse <- sqrt(mean(fcerror^2, na.rm = TRUE))
   
-  return(list(fc = fc_vec, rmse = rmse))
+  return(list(fc = fc_vec, rmse = rmse, fit = fit_train))
 }
 
 
@@ -622,7 +630,7 @@ sarima_one_step_fc <- function(train, holdout, order = c(0,0,0),
   fcerror <- yt - fc_vec
   rmse <- sqrt(mean(fcerror^2, na.rm = TRUE))
   
-  return(list(fc = fc_vec, rmse = rmse))
+  return(list(fc = fc_vec, rmse = rmse, fit = fit_train))
 }
 
 # 6. ARMAX MODELS
@@ -758,6 +766,69 @@ arimax_one_step_fc <- function(train, holdout, xreg_train, xreg_holdout,
   yt <- as.numeric(holdout)
   fcerror <- yt - fc_vec
   rmse <- sqrt(mean(fcerror^2, na.rm = TRUE))
+  
+  return(list(fc = fc_vec, rmse = rmse, fit = fit_train))
+}
+
+
+# 8. EXPANDING WINDOW FORECAST
+
+# Re-estimates the model at each step using an expanding training window.
+# At each holdout time t, fits ARIMA on observations 1...(n_train + t - 1),
+# then forecasts one step ahead. More expensive but avoids parameter staleness.
+
+arima_expanding_window_fc <- function(train, holdout, order = c(0,0,0),
+                                      include.mean = TRUE) {
+  n_train <- length(train)
+  n_holdout <- length(holdout)
+  full <- c(as.numeric(train), as.numeric(holdout))
+  
+  fc_vec <- numeric(n_holdout)
+  
+  for (t in 1:n_holdout) {
+    window_end <- n_train + t - 1
+    train_window <- full[1:window_end]
+    if (stats::is.ts(train)) {
+      train_window <- stats::ts(train_window,
+                                start = stats::start(train),
+                                frequency = stats::frequency(train))
+    }
+    fit_t <- forecast::Arima(train_window, order = order, include.mean = include.mean)
+    fc_vec[t] <- forecast::forecast(fit_t, h = 1)$mean
+  }
+  
+  yt <- as.numeric(holdout)
+  fcerror <- yt - fc_vec
+  rmse <- sqrt(mean(fcerror^2))
+  
+  return(list(fc = fc_vec, rmse = rmse))
+}
+
+sarima_expanding_window_fc <- function(train, holdout, order = c(0,0,0),
+                                       seasonal = c(0,0,0),
+                                       include.mean = TRUE) {
+  n_train <- length(train)
+  n_holdout <- length(holdout)
+  full <- c(as.numeric(train), as.numeric(holdout))
+  
+  fc_vec <- numeric(n_holdout)
+  
+  for (t in 1:n_holdout) {
+    window_end <- n_train + t - 1
+    train_window <- full[1:window_end]
+    if (stats::is.ts(train)) {
+      train_window <- stats::ts(train_window,
+                                start = stats::start(train),
+                                frequency = stats::frequency(train))
+    }
+    fit_t <- forecast::Arima(train_window, order = order, seasonal = seasonal,
+                             include.mean = include.mean)
+    fc_vec[t] <- forecast::forecast(fit_t, h = 1)$mean
+  }
+  
+  yt <- as.numeric(holdout)
+  fcerror <- yt - fc_vec
+  rmse <- sqrt(mean(fcerror^2))
   
   return(list(fc = fc_vec, rmse = rmse))
 }
