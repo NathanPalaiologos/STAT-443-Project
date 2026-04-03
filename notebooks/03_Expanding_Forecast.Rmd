@@ -1,0 +1,485 @@
+---
+title: "03_Expanding_Window_Forecast"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(knitr)
+library(tidyverse)
+library(forecast)
+library(lubridate)
+library(ggplot2)
+library(tseries)
+```
+
+```{r source helpers}
+source("../utils/one_step_model.R")
+source("../utils/expanding_window.R")
+```
+
+## Load Data
+
+We use the full EDA dataset (pre-differenced) saved from notebook 01.
+
+```{r load data}
+eda_df <- readRDS("../output/eda_df_nodiff.rds")
+
+full_df <- eda_df |> filter(date <= as.Date("2019-12-31"))
+
+hh_full <- ts(full_df$hh_save, start = c(1977, 1), frequency = 4)
+```
+
+## Expanding Window Design
+
+We use the first **20 years** (80 quarters, 1977 Q1 – 1996 Q4) as the initial training window.
+The expanding window then re-estimates the model at each subsequent quarter:
+
+- Step 1: Train on 1977 Q1 – 1996 Q4, forecast 1997 Q1.
+- Step 2: Train on 1977 Q1 – 1997 Q1, forecast 1997 Q2.
+- Continue until the end of the series (2019 Q4).
+
+This yields **92 one-step-ahead forecasts** (1997 Q1 – 2019 Q4), each produced by a model fitted to an ever-growing training window.
+
+```{r train-test split for expanding window}
+initial_end <- as.Date("1996-12-31")
+
+ew_train_df <- full_df |> filter(date <= initial_end)
+ew_test_df  <- full_df |> filter(date > initial_end)
+
+hh_train <- ts(ew_train_df$hh_save, start = c(1977, 1), frequency = 4)
+hh_test  <- ts(ew_test_df$hh_save,  start = c(1997, 1), frequency = 4)
+
+cat("Initial training window:", nrow(ew_train_df))
+cat("Holdout window:", nrow(ew_test_df))
+```
+
+```{r save expanding window splits}
+saveRDS(ew_train_df, file = "../output/ew_train_df.rds")
+saveRDS(ew_test_df,  file = "../output/ew_test_df.rds")
+```
+
+## ARIMA Order Identification
+
+```{r ACF PACF, fig.width=8, fig.height=6}
+dhh_train <- diff(hh_train)
+
+par(mfrow = c(2, 2))
+acf(hh_train, lag.max = 20, main = "ACF: hh_save (train)")
+pacf(hh_train, lag.max = 20, main = "PACF: hh_save (train)")
+acf(dhh_train, lag.max = 20, main = "ACF: diff(hh_save)")
+pacf(dhh_train, lag.max = 20, main = "PACF: diff(hh_save)")
+par(mfrow = c(1, 1))
+```
+
+```{r auto.arima on initial window}
+fit_auto <- auto.arima(hh_train,
+                       seasonal = TRUE,
+                       stepwise = FALSE,
+                       approximation = FALSE)
+summary(fit_auto)
+```
+
+## Training Set Fit
+
+Before evaluating holdout performance, we inspect how each model fits the initial 80-quarter training set. This diagnostic reveals whether a model can capture the in-sample dynamics of household net savings.
+
+### Benchmark Training Fits
+
+```{r benchmark training fits, fig.width=10, fig.height=8}
+n_train <- length(hh_train)
+train_dates <- ew_train_df$date
+
+# Persistence: fitted[t] = y[t-1]
+persist_train_fitted <- c(NA, as.numeric(hh_train[-n_train]))
+
+# Average: fitted[t] = overall mean of training set
+avg_train_fitted <- rep(mean(hh_train), n_train)
+
+# SES
+hw_ses <- HoltWinters(hh_train, beta = FALSE, gamma = FALSE)
+ses_fitted_raw <- as.numeric(hw_ses$fitted[, "xhat"])
+ses_train_fitted <- c(rep(NA, n_train - length(ses_fitted_raw)), ses_fitted_raw)
+
+# Holt Linear
+hw_holt <- HoltWinters(hh_train, gamma = FALSE)
+holt_fitted_raw <- as.numeric(hw_holt$fitted[, "xhat"])
+holt_train_fitted <- c(rep(NA, n_train - length(holt_fitted_raw)), holt_fitted_raw)
+
+# HW Additive
+hw_add <- HoltWinters(hh_train, seasonal = "additive")
+hwa_fitted_raw <- as.numeric(hw_add$fitted[, "xhat"])
+hwa_train_fitted <- c(rep(NA, n_train - length(hwa_fitted_raw)), hwa_fitted_raw)
+
+train_fit_df <- tibble(
+  date = train_dates,
+  Actual = as.numeric(hh_train),
+  Persistence = persist_train_fitted,
+  Average = avg_train_fitted,
+  SES = ses_train_fitted,
+  `Holt Linear` = holt_train_fitted,
+  `HW Additive` = hwa_train_fitted
+) |>
+  pivot_longer(-date, names_to = "Model", values_to = "value")
+
+ggplot(train_fit_df, aes(x = date, y = value, color = Model, linetype = Model)) +
+  geom_line(linewidth = 0.8) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Training set fit: Benchmark models (1977 Q1 – 1996 Q4)",
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+### ARIMA / SARIMA Training Fits
+
+```{r ARIMA SARIMA training fits, fig.width=10, fig.height=8}
+# Fit each ARIMA / SARIMA on the initial training window
+arima_specs <- list(
+  "ARIMA(1,1,1)" = c(1, 1, 1),
+  "ARIMA(0,1,1)" = c(0, 1, 1),
+  "ARIMA(2,1,0)" = c(2, 1, 0),
+  "ARIMA(1,1,0)" = c(1, 1, 0)
+)
+
+sarima_specs <- list(
+  "SARIMA(1,1,1)(1,0,0)[4]" = list(order = c(1,1,1), seasonal = c(1,0,0)),
+  "SARIMA(0,1,1)(1,0,0)[4]" = list(order = c(0,1,1), seasonal = c(1,0,0)),
+  "SARIMA(1,1,1)(0,0,1)[4]" = list(order = c(1,1,1), seasonal = c(0,0,1)),
+  "SARIMA(0,1,1)(0,0,1)[4]" = list(order = c(0,1,1), seasonal = c(0,0,1))
+)
+
+# Store training fits for plotting
+arima_train_fits <- list()
+for (nm in names(arima_specs)) {
+  fit_obj <- forecast::Arima(hh_train, order = arima_specs[[nm]], include.mean = TRUE)
+  arima_train_fits[[nm]] <- as.numeric(fitted(fit_obj))
+}
+
+sarima_train_fits <- list()
+for (nm in names(sarima_specs)) {
+  sp <- sarima_specs[[nm]]
+  fit_obj <- forecast::Arima(hh_train, order = sp$order, seasonal = sp$seasonal,
+                             include.mean = TRUE)
+  sarima_train_fits[[nm]] <- as.numeric(fitted(fit_obj))
+}
+
+arima_train_df <- tibble(date = train_dates, Actual = as.numeric(hh_train))
+for (nm in names(arima_train_fits)) {
+  arima_train_df[[nm]] <- arima_train_fits[[nm]]
+}
+for (nm in names(sarima_train_fits)) {
+  arima_train_df[[nm]] <- sarima_train_fits[[nm]]
+}
+
+arima_train_long <- arima_train_df |>
+  pivot_longer(-date, names_to = "Model", values_to = "value")
+
+ggplot(arima_train_long, aes(x = date, y = value, color = Model, linetype = Model)) +
+  geom_line(linewidth = 0.8) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Paired") +
+  labs(
+    title = "Training set fit: ARIMA / SARIMA models (1977 Q1 – 1996 Q4)",
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+```{r training RMSE comparison}
+train_rmse <- function(actual, fitted) {
+  valid <- !is.na(fitted)
+  sqrt(mean((actual[valid] - fitted[valid])^2))
+}
+
+train_rmse_tbl <- tibble(
+  Model = c("Persistence", "Average", "SES", "Holt Linear", "HW Additive",
+            names(arima_train_fits), names(sarima_train_fits)),
+  Train_RMSE = round(c(
+    train_rmse(as.numeric(hh_train), persist_train_fitted),
+    train_rmse(as.numeric(hh_train), avg_train_fitted),
+    train_rmse(as.numeric(hh_train), ses_train_fitted),
+    train_rmse(as.numeric(hh_train), holt_train_fitted),
+    train_rmse(as.numeric(hh_train), hwa_train_fitted),
+    sapply(arima_train_fits, \(f) train_rmse(as.numeric(hh_train), f)),
+    sapply(sarima_train_fits, \(f) train_rmse(as.numeric(hh_train), f))
+  ), 4)
+) |>
+  arrange(Train_RMSE)
+
+# Print training RMSE table
+train_rmse_tbl
+```
+
+## Benchmark Holdout Forecasts
+
+We evaluate all benchmark rules on the 92-quarter holdout for reference.
+
+```{r benchmarks}
+ew_rmse_tbl <- tibble(Model = character(), Method = character(), RMSE = double())
+ew_fc_store <- list()
+
+# Persistence
+res <- persist_fc(hh_train, hh_test)
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "Persistence", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$Persistence <- res$fc
+
+# Average
+res <- iid_fc(hh_train, hh_test)
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "Average", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$Average <- res$fc
+
+# Average by Period
+res <- iidbyperiod_fc(hh_train, hh_test, periodicity = 4)
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "Average by Period", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$`Average by Period` <- res$fc
+
+# SES
+res <- esm_fc(hh_train, hh_test,
+              alpha = hw_ses$alpha,
+              level = as.numeric(hw_ses$coefficients[1]))
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "SES", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$SES <- res$fc
+
+# Holt Linear
+res <- lholt_fc(hh_train, hh_test,
+                alpha = hw_holt$alpha,
+                beta  = hw_holt$beta,
+                level = as.numeric(hw_holt$coefficients[1]),
+                slope = as.numeric(hw_holt$coefficients[2]))
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "Holt Linear", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$`Holt Linear` <- res$fc
+
+# HW Additive
+res <- aseason_fc(hh_train, hh_test,
+                  alpha  = hw_add$alpha,
+                  beta   = hw_add$beta,
+                  gamma  = hw_add$gamma,
+                  level  = as.numeric(hw_add$coefficients[1]),
+                  slope  = as.numeric(hw_add$coefficients[2]),
+                  season = as.numeric(hw_add$coefficients[3:6]))
+ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = "HW Additive", Method = "Benchmark", RMSE = res$rmse)
+ew_fc_store$`HW Additive` <- res$fc
+
+cat("Benchmark RMSEs:", ew_rmse_tbl)
+```
+
+## Fixed-Parameter One-Step Forecasts (ARIMA / SARIMA)
+
+For reference, we run fixed-parameter Kalman filtering (same approach as notebook 02) on this longer holdout.
+
+```{r ARIMA fixed parameter}
+arima_fixed_results <- list()
+
+for (nm in names(arima_specs)) {
+  res <- arima_one_step_fc(hh_train, hh_test,
+                           order = arima_specs[[nm]],
+                           include.mean = TRUE)
+  arima_fixed_results[[nm]] <- res
+  ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = nm, Method = "Fixed", RMSE = res$rmse)
+  ew_fc_store[[paste0(nm, " (fixed)")]] <- res$fc
+}
+
+arima_fixed_tbl <- tibble(
+  Model = names(arima_specs),
+  AIC = sapply(arima_fixed_results, \(r) round(r$fit$aic, 2)),
+  RMSE_Fixed = sapply(arima_fixed_results, \(r) round(r$rmse, 4))
+)
+arima_fixed_tbl
+```
+
+```{r SARIMA fixed parameter}
+sarima_fixed_results <- list()
+for (nm in names(sarima_specs)) {
+  sp <- sarima_specs[[nm]]
+  res <- sarima_one_step_fc(hh_train, hh_test,
+                            order = sp$order,
+                            seasonal = sp$seasonal,
+                            include.mean = TRUE)
+  sarima_fixed_results[[nm]] <- res
+  ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = nm, Method = "Fixed", RMSE = res$rmse)
+  ew_fc_store[[paste0(nm, " (fixed)")]] <- res$fc
+}
+
+sarima_fixed_tbl <- tibble(
+  Model = names(sarima_specs),
+  AIC = sapply(sarima_fixed_results, \(r) round(r$fit$aic, 2)),
+  RMSE_Fixed = sapply(sarima_fixed_results, \(r) round(r$rmse, 4))
+)
+sarima_fixed_tbl
+```
+
+## Expanding Window Forecasts
+
+Now we re-estimate each model at every holdout step.
+
+```{r ARIMA expanding window}
+arima_ew_results <- list()
+for (nm in names(arima_specs)) {
+  res <- arima_expanding_window_fc(hh_train, hh_test,
+                                   order = arima_specs[[nm]],
+                                   include.mean = TRUE)
+  arima_ew_results[[nm]] <- res
+  ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = nm, Method = "Expanding", 
+                         RMSE = res$rmse)
+  ew_fc_store[[paste0(nm, " (expanding)")]] <- res$fc
+}
+```
+
+```{r SARIMA expanding window}
+sarima_ew_results <- list()
+for (nm in names(sarima_specs)) {
+  sp <- sarima_specs[[nm]]
+  res <- sarima_expanding_window_fc(hh_train, hh_test,
+                                    order = sp$order,
+                                    seasonal = sp$seasonal,
+                                    include.mean = TRUE)
+  sarima_ew_results[[nm]] <- res
+  ew_rmse_tbl <- add_row(ew_rmse_tbl, Model = nm, Method = "Expanding", 
+                         RMSE = res$rmse)
+  ew_fc_store[[paste0(nm, " (expanding)")]] <- res$fc
+}
+```
+
+## Comparison Tables
+
+### Fixed vs Expanding Window
+
+```{r comparison table}
+# ARIMA: fixed vs expanding
+arima_compare <- tibble(
+  Model = names(arima_specs),
+  RMSE_Fixed = sapply(arima_fixed_results, \(r) round(r$rmse, 4)),
+  RMSE_Expanding = sapply(arima_ew_results, \(r) round(r$rmse, 4)),
+  Improvement_pct = round((RMSE_Fixed - RMSE_Expanding) / RMSE_Fixed * 100, 2)
+)
+cat("=== ARIMA: Fixed vs Expanding ===\n")
+arima_compare
+
+# SARIMA: fixed vs expanding
+sarima_compare <- tibble(
+  Model = names(sarima_specs),
+  RMSE_Fixed = sapply(sarima_fixed_results, \(r) round(r$rmse, 4)),
+  RMSE_Expanding = sapply(sarima_ew_results, \(r) round(r$rmse, 4)),
+  Improvement_pct = round((RMSE_Fixed - RMSE_Expanding) / RMSE_Fixed * 100, 2)
+)
+cat("\n=== SARIMA: Fixed vs Expanding ===\n")
+sarima_compare
+```
+
+### Full RMSE Ranking (Benchmarks + ARIMA/SARIMA)
+
+```{r overall RMSE ranking}
+ew_rmse_tbl <- ew_rmse_tbl |>
+  mutate(RMSE = round(RMSE, 4)) |>
+  arrange(RMSE)
+
+ew_rmse_tbl
+
+best_ew_model <- ew_rmse_tbl |> slice(1)
+
+best_ew_model
+```
+
+```{r persistence comparison}
+# How do expanding window models compare to persistence?
+persist_rmse <- ew_rmse_tbl |> filter(Model == "Persistence") |> pull(RMSE)
+
+
+cat("Models that beat Persistence:\n")
+ew_rmse_tbl |> filter(RMSE < persist_rmse)
+```
+
+```{r save expanding window results}
+saveRDS(ew_rmse_tbl, file = "../output/ew_rmse_tbl.rds")
+```
+
+## Holdout Visualization
+
+### Benchmarks vs Best Expanding Window Models
+
+```{r all models holdout, fig.width=10, fig.height=6}
+best_arima_nm  <- arima_compare$Model[which.min(arima_compare$RMSE_Expanding)]
+best_sarima_nm <- sarima_compare$Model[which.min(sarima_compare$RMSE_Expanding)]
+
+fc_all_df <- tibble(
+  date = ew_test_df$date,
+  Actual = as.numeric(hh_test),
+  Persistence = as.numeric(ew_fc_store$Persistence),
+  Average = as.numeric(ew_fc_store$Average),
+  SES = as.numeric(ew_fc_store$SES),
+  `Holt Linear` = as.numeric(ew_fc_store$`Holt Linear`),
+  `HW Additive` = as.numeric(ew_fc_store$`HW Additive`)
+)
+fc_all_df[[paste0(best_arima_nm, " (exp)")]] <-
+  as.numeric(ew_fc_store[[paste0(best_arima_nm, " (expanding)")]])
+fc_all_df[[paste0(best_sarima_nm, " (exp)")]] <-
+  as.numeric(ew_fc_store[[paste0(best_sarima_nm, " (expanding)")]])
+
+fc_all_long <- fc_all_df |>
+  pivot_longer(-date, names_to = "Model", values_to = "value")
+
+ggplot(fc_all_long, aes(x = date, y = value, color = Model, linetype = Model)) +
+  geom_line(linewidth = 0.8) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Holdout forecasts: Benchmarks vs best expanding window models",
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+### Fixed vs Expanding: Best ARIMA
+
+```{r best ARIMA fixed vs expanding, fig.width=10, fig.height=5}
+fc_df <- tibble(
+  date = ew_test_df$date,
+  Actual = as.numeric(hh_test),
+  `Fixed params`     = as.numeric(ew_fc_store[[paste0(best_arima_nm, " (fixed)")]]),
+  `Expanding window`  = as.numeric(ew_fc_store[[paste0(best_arima_nm, " (expanding)")]]),
+  Persistence        = as.numeric(ew_fc_store$Persistence)
+) |>
+  pivot_longer(-date, names_to = "Method", values_to = "value")
+
+ggplot(fc_df, aes(x = date, y = value, color = Method, linetype = Method)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = paste("Fixed vs Expanding Window:", best_arima_nm),
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+### Fixed vs Expanding: Best SARIMA
+
+```{r best SARIMA fixed vs expanding, fig.width=10, fig.height=5}
+fc_df2 <- tibble(
+  date = ew_test_df$date,
+  Actual = as.numeric(hh_test),
+  `Fixed params`     = as.numeric(ew_fc_store[[paste0(best_sarima_nm, " (fixed)")]]),
+  `Expanding window`  = as.numeric(ew_fc_store[[paste0(best_sarima_nm, " (expanding)")]]),
+  Persistence        = as.numeric(ew_fc_store$Persistence)
+) |>
+  pivot_longer(-date, names_to = "Method", values_to = "value")
+
+ggplot(fc_df2, aes(x = date, y = value, color = Method, linetype = Method)) +
+  geom_line(linewidth = 0.9) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = paste("Fixed vs Expanding Window:", best_sarima_nm),
+    x = "Quarter", y = "Household net savings"
+  )
+```
+
+## Interpretation
+
+- The expanding window re-estimates model parameters at each step, allowing them to adapt to new data. Over a 92-quarter holdout, any structural shifts in the savings process should be captured more faithfully than with parameters fixed at 1996 Q4 values.
+- Comparing the expanding window ARIMA/SARIMA models directly against benchmark rules (Persistence, Average, SES, Holt, HW Additive) reveals whether the added complexity of parametric models is justified.
+- If the expanding window RMSE is similar to the fixed-parameter RMSE, this confirms that the series is close to a random walk, and parameter re-estimation adds little value.
+- The persistence benchmark remains the key reference: any model must beat persistence to justify its complexity.
+- The training set fit diagnostic helps identify whether a model captures the historical dynamics or merely overfits. A model with low training RMSE but high holdout RMSE is likely overfitting.

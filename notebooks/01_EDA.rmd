@@ -16,7 +16,7 @@ library(tseries)
 
 ### Load the Harmonized Data and a First Glimpse
 ```{r data loading, include=TRUE}
-macro_df <- read_csv("data/macro_panel_wide_raw.csv", show_col_types = FALSE) |>
+macro_df <- read_csv("../data/macro_panel_wide_raw.csv", show_col_types = FALSE) |>
   mutate(quarterly_date = as.Date(quarterly_date)) |>
   mutate(household_consumption_pc = household_consumption / population * 1000000,
          gross_domestic_income_pc = gross_domestic_income / population * 1000000,
@@ -130,9 +130,9 @@ saveRDS(eda_df, file = "../output/eda_df_nodiff.rds")
 ```{r splitting into train and test}
 # We keep the last 5 years (20 quarters) for testing, which means the training set includes data up to the end of 2014.
 train_df <- eda_df |>
-  filter(date <= as.Date("2014-12-31"))
+  filter(date <= as.Date("2009-12-31"))
 test_df <- eda_df |>
-  filter(date > as.Date("2014-12-31"))
+  filter(date > as.Date("2009-12-31"))
 
 saveRDS(train_df, file = "../output/train_df.rds")
 saveRDS(test_df, file = "../output/test_df.rds")
@@ -494,8 +494,12 @@ glimpse(eda_df)
 saveRDS(eda_df, file = "../output/macro_df_diff.rds")
 ```
 
-```{r import variograms}
-knitr::include_graphics("../output/variograms_all.png")
+```{r variograms levels}
+knitr::include_graphics("../output/variograms_levels.png")
+```
+
+```{r variograms differenced}
+knitr::include_graphics("../output/variograms_differenced.png")
 ```
 - The plots indicate that most variables in levels are not stationary, because their empirical variogram G increases with lag and often departs from the theoretical stationary variogram H. 
 - For many level variables, this increase is approximately linear rather than sharply curved, which suggests that a single difference is likely sufficient to achieve approximate stationarity. This pattern is especially obvious for variables such as national net savings, household net savings, corporate net savings, unemployment rate, market interest rates, household net saving rates, and corporate net saving rates, where G rises with lag and H does not fully overlap with it. 
