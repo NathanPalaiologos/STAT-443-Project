@@ -164,41 +164,22 @@ ggplot(savings_long, aes(x = date, y = value, color = series)) +
   )
 ```
 
-```{r Focus on household and corporate net savings}
-main_response_long <- eda_df |>
-  select(date, hh_save, corp_save) |>
-  pivot_longer(
-    cols = -date,
-    names_to = "series",
-    values_to = "value"
-  )
-
-ggplot(main_response_long, aes(x = date, y = value)) +
+```{r Focus on household net savings}
+ggplot(eda_df, aes(x = date, y = hh_save)) +
   geom_line(linewidth = 0.9) +
-  facet_wrap(~ series, scales = "free_y", ncol = 1) +
   theme_minimal() +
   labs(
-    title = "Main response series",
+    title = "Household net savings (response variable)",
     x = "Quarter",
     y = "Net savings"
   )
 ```
-```{r auto.arima check for main response series}
+```{r auto.arima check for household net savings}
 hh_ts <- ts(eda_df$hh_save, start = c(1977, 1), frequency = 4)
-corp_ts <- ts(eda_df$corp_save, start = c(1977, 1), frequency = 4)
 
 auto_arima_hh <- auto.arima(hh_ts)
-auto_arima_corp <- auto.arima(corp_ts)
 
 summary(auto_arima_hh)
-summary(auto_arima_corp)
-```
-```{r auto.arima checks for the main response series in rate of GDI}
-hh_rate_ts <- ts(eda_df$hh_rate, start = c(1977,1), frequency = 4)
-
-auto_arima_hh_rate <- auto.arima(hh_rate_ts)
-
-summary(auto_arima_hh_rate)
 ```
 ```{r auto.arima checks for consumption, GDI and GPDI}
 cons_ts <- ts(eda_df$cons, start = c(1977, 1), frequency = 4)
@@ -296,7 +277,7 @@ summary(select(
 
 ```{r Plot the transformed difference series}
 diff_long <- eda_df |>
-  select(date, dhh, dcorp) |>
+  select(date, dhh) |>
   pivot_longer(
     cols = -date,
     names_to = "series",
@@ -304,34 +285,13 @@ diff_long <- eda_df |>
   )
 ggplot(diff_long, aes(x = date, y = value)) +
   geom_line(linewidth = 0.9) +
-  facet_wrap(~ series, scales = "free_y", ncol = 1) +
   theme_minimal() +
   labs(
-    title = "Change of household and corporate net savings",
+    title = "Change of household net savings",
     x = "Quarter",
     y = "Change in net savings"
   )
 
-```
-
-```{r Plot transformed household and national series}
-transformed_long <- eda_df |>
-  select(date, dhh_rate, dnat_rate) |>
-  pivot_longer(
-    cols = -date,
-    names_to = "series",
-    values_to = "value"
-  )
-
-ggplot(transformed_long, aes(x = date, y = value*100)) +
-  geom_line(linewidth = 0.9) +
-  facet_wrap(~ series, scales = "free_y", ncol = 1) +
-  theme_minimal() +
-  labs(
-    title = "Change of household and national net saving Rates",
-    x = "Quarter",
-    y = "Change"
-  )
 ```
 
 ```{r Time-series diagnostics for household net savings}
@@ -353,119 +313,48 @@ par(mfrow = c(1, 1))
 adf.test(na.omit(dhh_ts))
 ```
 
-```{r Benhmark diagnostics for corporate net savings}
-corp_ts <- ts(
-  eda_df$corp_save,
-  start = c(1977, 1),
-  frequency = 4
-)
+- From the above, we see that the differenced household net savings appear stationary based on the ADF test and the visual diagnostics. 
+- But they don't demonstrate strong autocorrelation, which suggests that they may be mostly driven by exogenous factors rather than strong internal dynamics.
 
-dcorp_ts <- diff(corp_ts)
-
-par(mfrow = c(2, 2))
-plot(corp_ts, main = "Corporate net savings")
-plot(dcorp_ts, main = "First difference: corporate net savings")
-acf(na.omit(dcorp_ts), lag.max = 20, main = "ACF: diff corporate savings")
-pacf(na.omit(dcorp_ts), lag.max = 20, main = "PACF: diff corporate savings")
-par(mfrow = c(1, 1))
-
-# ADF test
-adf.test(na.omit(dcorp_ts))
-```
-
-```{r Benchmark diagnostics for household saving rates}
-hh_rate_ts <- ts(
-  eda_df$hh_rate,
-  start = c(1977, 1),
-  frequency = 4
-)
-
-dhh_rate_ts <- diff(hh_rate_ts)
-
-par(mfrow = c(2, 2))
-plot(hh_rate_ts, main = "Household net saving rate")
-plot(dhh_rate_ts, main = "First difference: household net saving rate")
-acf(na.omit(dhh_rate_ts), lag.max = 20, main = "ACF: diff household saving rate")
-pacf(na.omit(dhh_rate_ts), lag.max = 20, main = "PACF: diff household saving rate")
-par(mfrow = c(1, 1))
-
-# ADF test
-adf.test(na.omit(dhh_rate_ts))
-```
-
-- From the above, we see that the differenced household and corporate net savings appear to be stationary based on the ADF test and the visual diagnostics. 
-- But they don't demonstrate strong autocorrelation, which suggests that they may be mostly driven by exogenous factors rather than strong internal dynamics. 
-- The national net saving rate shows similar patterns, but with slightly stronger autocorrelation at lag 1, which may reflect some persistence in the overall saving behavior of the economy.
-
-```{r Lead-lag check of household and corporate net savings}
-ccf(na.omit(eda_df$dhh), na.omit(eda_df$dcorp),
-    main = "hh vs corp net savings")
+```{r Lead-lag check of household savings and macro variables}
+ccf(na.omit(eda_df$dhh), na.omit(eda_df$ldgdi),
+    main = "hh savings vs log GDI")
 ```
 
 
-```{r lead-lag-dhh-dcorp-macro}
+```{r lead-lag-dhh-macro}
 par(
-  mfrow = c(2, 4),
-  mar = c(5, 5, 3, 1),   # c(bottom, left, top, right)
-  mgp = c(2, 0.8, 0),        # Pulls axis labels closer to the plot
-  cex.main = 0.95,           # Scales down the main title
-  cex.lab = 0.9,             # Scales down axis labels
-  cex.axis = 0.85            # Scales down axis tick values
+  mfrow = c(2, 2),
+  mar = c(5, 5, 3, 1),
+  mgp = c(2, 0.8, 0),
+  cex.main = 0.95,
+  cex.lab = 0.9,
+  cex.axis = 0.85
 )
 
 ccf(na.omit(eda_df$ldgdi), na.omit(eda_df$dhh),
     main = "log GDI vs hh savings")
-ccf(na.omit(eda_df$ldgdi), na.omit(eda_df$dcorp),
-    main = "log GDI vs corp savings")
 
 ccf(na.omit(eda_df$dunemp), na.omit(eda_df$dhh),
     main = "Unemp vs hh savings")
-ccf(na.omit(eda_df$dunemp), na.omit(eda_df$dcorp),
-    main = "Unemp vs corp savings")
 
 ccf(na.omit(eda_df$ldcons), na.omit(eda_df$dhh),
     main = "Cons vs hh savings")
-ccf(na.omit(eda_df$ldcons), na.omit(eda_df$dcorp),
-    main = "Cons vs corp savings")
 
 ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dhh),
     main = "GPDI vs hh savings")
-ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dcorp),
-    main = "GPDI vs corp savings")
-
-```
-
-
-```{r lead-lag-dhh-rate-macro}
-#| fig.width: 7
-#| fig.height: 2.5
-par(
-  mfrow = c(1, 4)
-)
-
-ccf(na.omit(eda_df$ldgdi), na.omit(eda_df$dhh_rate),
-    main = "log GDI vs hh saving rate")
-
-ccf(na.omit(eda_df$dunemp), na.omit(eda_df$dhh_rate),
-    main = "Unemp vs hh saving rate")
-
-ccf(na.omit(eda_df$ldcons), na.omit(eda_df$dhh_rate),
-    main = "Cons vs hh saving rate")
-
-ccf(na.omit(eda_df$ldgpdi), na.omit(eda_df$dhh_rate),
-    main = "GPDI vs hh saving rate")
 
 par(mfrow = c(1, 1))
 ```
 From the above, we see the following:
 
-- Both household and corporate net saving rates show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
-- Lead lag patterns between household and corporate net saving change is strong, with household net saving change leading corporate net saving change by 1-2 quarters, which is consistent with the idea that household savings behavior may influence corporate savings decisions through demand channels.
+- Household net savings show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
+- GPDI shows a clear leading relationship with household savings at lags 1–3, which motivates its use as an exogenous regressor in ARIMAX models.
 
 ```{r Simple scatterplot matrix}
 pairs(
   eda_df |>
-    select(hh_save, corp_save, gdi, cons, unemp, cpi, interest) |>
+    select(hh_save, gdi, cons, unemp, cpi, interest) |>
     na.omit(),
   main = "Scatterplot matrix for key variables"
 )
@@ -474,15 +363,7 @@ pairs(
 ```{r Scatterplot matrix of differenced variables}
 pairs(
   eda_df |>
-    select(dhh, dcorp, ldgdi, ldcons, dunemp, ldcpi, dinterest) |>
-    na.omit(),
-  main = "Scatterplot matrix for key variables after differencing"
-)
-```
-```{r Scatterplot matrix of differenced saving rates}
-pairs(
-  eda_df |>
-    select(dhh_rate, ldgdi, ldcons, dunemp, ldcpi, dinterest) |>
+    select(dhh, ldgdi, ldcons, dunemp, ldcpi, dinterest) |>
     na.omit(),
   main = "Scatterplot matrix for key variables after differencing"
 )

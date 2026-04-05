@@ -437,6 +437,11 @@ Based on the CCF evidence and the EDA findings, we select regressors with clear 
 - `ldgpdi`
 - `ldcpi`
 
+We construct two regressor sets to test whether all CCF-selected variables improve forecasts, or whether only the statistically significant ones matter:
+
+- **Full set** (`ldgpdi_lag1`, `ldcpi_lag2`, `ldgpdi_lag3`): all CCF-justified lags.
+- **Reduced set** (`ldgpdi_lag1` only): retains only the regressor whose coefficient is statistically significant at the 5% level in the initial ARIMAX fit.
+
 ```{r ARIMAX preprocessing}
 # Compute stationary exogenous variables across the full sample
 arimax_df <- bind_rows(train_df, test_df) |>
@@ -451,12 +456,20 @@ arimax_df <- bind_rows(train_df, test_df) |>
   drop_na(ldgpdi_lag1, ldcpi_lag2, ldgpdi_lag3) # Drop initial rows with NA due to differencing and lagging
 
 arimax_vars <- c("ldgpdi_lag1", "ldcpi_lag2", "ldgpdi_lag3")
+arimax_reduced_vars <- c("ldgpdi_lag1")
 
 x_train <- arimax_df |> filter(date <= as.Date("2009-12-31")) |>
   select(all_of(arimax_vars)) |>
   as.matrix()
 x_test <- arimax_df |> filter(date > as.Date("2009-12-31")) |>
   select(all_of(arimax_vars)) |>
+  as.matrix()
+
+x_train_reduced <- arimax_df |> filter(date <= as.Date("2009-12-31")) |>
+  select(all_of(arimax_reduced_vars)) |>
+  as.matrix()
+x_test_reduced <- arimax_df |> filter(date > as.Date("2009-12-31")) |>
+  select(all_of(arimax_reduced_vars)) |>
   as.matrix()
 ```
 
@@ -534,11 +547,11 @@ arimax_011 <- arimax_one_step_fc(
 
 arimax_tbl <- tibble(
   Model = c(
-    "ARIMAX(2,1,3)",
-    "ARIMAX(2,1,2)",
-    "ARIMAX(1,1,2)",
-    "ARIMAX(1,1,1)",
-    "ARIMAX(0,1,1)"
+    "ARIMAX(2,1,3) (Full)",
+    "ARIMAX(2,1,2) (Full)",
+    "ARIMAX(1,1,2) (Full)",
+    "ARIMAX(1,1,1) (Full)",
+    "ARIMAX(0,1,1) (Full)"
   ),
   AIC = round(c(
     arimax_213$fit$aic,
@@ -559,24 +572,102 @@ arimax_tbl <- tibble(
 arimax_tbl
 ```
 
+### Reduced ARIMAX (only `ldgpdi_lag1`)
+
+In the previous part, we found that only the `ldgpdi_lag1` regressor is statistically significant at the 5% level. 
+
+Following the parsimonious principle, we now test whether including only this regressor improves forecast performance, or whether the additional regressors with high CCF but non-significant coefficients add value.`
+
+```{r ARIMAX reduced forecast}
+arimax_r_111 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 1),
+  xreg_train = x_train_reduced,
+  xreg_holdout = x_test_reduced,
+  include.mean = TRUE
+)
+
+arimax_r_011 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(0, 1, 1),
+  xreg_train = x_train_reduced,
+  xreg_holdout = x_test_reduced,
+  include.mean = TRUE
+)
+
+arimax_r_112 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(1, 1, 2),
+  xreg_train = x_train_reduced,
+  xreg_holdout = x_test_reduced,
+  include.mean = TRUE
+)
+
+arimax_r_212 <- arimax_one_step_fc(
+  train = hh_train_x,
+  holdout = hh_test,
+  order = c(2, 1, 2),
+  xreg_train = x_train_reduced,
+  xreg_holdout = x_test_reduced,
+  include.mean = TRUE
+)
+
+arimax_r_tbl <- tibble(
+  Model = c(
+    "ARIMAX(1,1,1) (Reduced)",
+    "ARIMAX(0,1,1) (Reduced)",
+    "ARIMAX(1,1,2) (Reduced)",
+    "ARIMAX(2,1,2) (Reduced)"
+  ),
+  AIC = round(c(
+    arimax_r_111$fit$aic,
+    arimax_r_011$fit$aic,
+    arimax_r_112$fit$aic,
+    arimax_r_212$fit$aic
+  ), 2),
+  RMSE = c(
+    arimax_r_111$rmse,
+    arimax_r_011$rmse,
+    arimax_r_112$rmse,
+    arimax_r_212$rmse
+  )
+)
+
+# Combined ARIMAX comparison
+arimax_combined_tbl <- bind_rows(arimax_tbl, arimax_r_tbl) |>
+  arrange(RMSE)
+arimax_combined_tbl
+```
+
 ```{r Store the best ARIMAX}
 arimax_fcs <- list(
-  "ARIMAX(2,1,3)" = arimax_213$fc,
-  "ARIMAX(2,1,2)" = arimax_212$fc,
-  "ARIMAX(1,1,2)" = arimax_112$fc,
-  "ARIMAX(1,1,1)" = arimax_111$fc,
-  "ARIMAX(0,1,1)" = arimax_011$fc
+  "ARIMAX(2,1,3) (Full)" = arimax_213$fc,
+  "ARIMAX(2,1,2) (Full)" = arimax_212$fc,
+  "ARIMAX(1,1,2) (Full)" = arimax_112$fc,
+  "ARIMAX(1,1,1) (Full)" = arimax_111$fc,
+  "ARIMAX(0,1,1) (Full)" = arimax_011$fc,
+  "ARIMAX(1,1,1) (Reduced)" = arimax_r_111$fc,
+  "ARIMAX(0,1,1) (Reduced)" = arimax_r_011$fc,
+  "ARIMAX(1,1,2) (Reduced)" = arimax_r_112$fc,
+  "ARIMAX(2,1,2) (Reduced)" = arimax_r_212$fc
 )
 arimax_fits <- list(
-  "ARIMAX(2,1,3)" = arimax_213$fit,
-  "ARIMAX(2,1,2)" = arimax_212$fit,
-  "ARIMAX(1,1,2)" = arimax_112$fit,
-  "ARIMAX(1,1,1)" = arimax_111$fit,
-  "ARIMAX(0,1,1)" = arimax_011$fit
+  "ARIMAX(2,1,3) (Full)" = arimax_213$fit,
+  "ARIMAX(2,1,2) (Full)" = arimax_212$fit,
+  "ARIMAX(1,1,2) (Full)" = arimax_112$fit,
+  "ARIMAX(1,1,1) (Full)" = arimax_111$fit,
+  "ARIMAX(0,1,1) (Full)" = arimax_011$fit,
+  "ARIMAX(1,1,1) (Reduced)" = arimax_r_111$fit,
+  "ARIMAX(0,1,1) (Reduced)" = arimax_r_011$fit,
+  "ARIMAX(1,1,2) (Reduced)" = arimax_r_112$fit,
+  "ARIMAX(2,1,2) (Reduced)" = arimax_r_212$fit
 )
-best_arimax_idx   <- which.min(arimax_tbl$RMSE)
-best_arimax_label <- arimax_tbl$Model[best_arimax_idx]
-rmse_tbl <- add_row(rmse_tbl, Model = best_arimax_label, RMSE = arimax_tbl$RMSE[best_arimax_idx])
+best_arimax_idx   <- which.min(arimax_combined_tbl$RMSE)
+best_arimax_label <- arimax_combined_tbl$Model[best_arimax_idx]
+rmse_tbl <- add_row(rmse_tbl, Model = best_arimax_label, RMSE = arimax_combined_tbl$RMSE[best_arimax_idx])
 fc_store[[best_arimax_label]] <- arimax_fcs[[best_arimax_label]]
 ```
 
@@ -775,7 +866,7 @@ saveRDS(fc_store,  file = "../output/hh_fc_store.rds")
 
 ## Training Set Fit
 
-Before examining holdout forecasts, we inspect how well each model fits the training data (1977 Q1 – 2009 Q4). This diagnostic highlights whether a model captures in-sample dynamics or merely overfits noise.
+Before examining holdout forecasts, we inspect how well each model fits the training data (1977 Q1 -- 2009 Q4). This diagnostic highlights whether a model captures in-sample dynamics or merely overfits noise.
 
 ### Benchmark & ESM Training Fits
 
@@ -817,7 +908,7 @@ ggplot(bench_fit_df, aes(x = date, y = value, color = Model, linetype = Model)) 
   theme_minimal() +
   scale_color_brewer(palette = "Dark2") +
   labs(
-    title = "Training set fit: Benchmark & ESM models (1977 Q1 – 2009 Q4)",
+    title = "Training set fit: Benchmark & ESM models (1977 Q1 -- 2009 Q4)",
     x = "Quarter", y = "Household net savings"
   )
 ```
@@ -859,7 +950,7 @@ ggplot(arima_train_long, aes(x = date, y = value, color = Model, linetype = Mode
   theme_minimal() +
   scale_color_brewer(palette = "Dark2") +
   labs(
-    title = "Training set fit: ARIMA / SARIMA / ARIMAX models (1977 Q1 – 2009 Q4)",
+    title = "Training set fit: ARIMA / SARIMA / ARIMAX models (1977 Q1 -- 2009 Q4)",
     x = "Quarter", y = "Household net savings"
   )
 ```
@@ -887,7 +978,6 @@ train_rmse_tbl <- tibble(
 ) |>
   arrange(Train_RMSE)
 
-cat("=== Training Set RMSE (in-sample fit) ===\n")
 train_rmse_tbl
 ```
 
@@ -895,36 +985,54 @@ A large gap between training RMSE and holdout RMSE suggests overfitting; models 
 
 ## Holdout Visualization
 
-```{r holdout forecast plot, fig.width=10, fig.height=6}
+```{r holdout forecast plot, fig.width=12, fig.height=8}
 fc_df <- tibble(date = test_df$date, Actual = as.numeric(hh_test))
-
 
 for (m in names(fc_store)) {
   fc_df[[m]] <- as.numeric(fc_store[[m]])
 }
 
-fc_long <- fc_df |>
-  pivot_longer(cols = -date, names_to = "Model", values_to = "value")|>
-  filter(
-    Model %in% c("Actual", "Average", "Persistence", 
-                 "HW Additive", 
-                 best_arima_label, 
-                 best_sarima_label,
-                 best_arimax_label,
-                 best_pim_label)
-  ) # Keep only benchmarks and the best HW and ARIMA/SARIMA models for clarity
+# Select key models for the faceted comparison
+selected_models <- c("Persistence", "Average", "HW Additive",
+                     best_arima_label, best_sarima_label,
+                     best_arimax_label, best_pim_label)
 
-ggplot(fc_long, aes(x = date, y = value, color = Model, linetype = Model)) +
-  geom_line(linewidth = 0.9) +
-  theme_minimal() +
-  scale_color_brewer(palette = "Dark2") +
+fc_long <- fc_df |>
+  pivot_longer(cols = -date, names_to = "Model", values_to = "value") |>
+  filter(Model %in% c("Actual", selected_models))
+
+# Separate Actual for the grey background line
+actual_df <- fc_long |> filter(Model == "Actual")
+model_df  <- fc_long |> filter(Model != "Actual")
+
+ggplot(model_df, aes(x = date)) +
+  geom_line(data = actual_df |> select(-Model) |> 
+              crossing(Model = unique(model_df$Model)),
+            aes(y = value), color = "grey60", linewidth = 0.6) +
+  geom_line(aes(y = value), color = "#1b9e77", linewidth = 0.8) +
+  facet_wrap(~ Model, ncol = 2) +
+  theme_minimal(base_size = 11) +
+  theme(strip.text = element_text(face = "bold")) +
   labs(
-    title = "One-step-ahead holdout forecasts of household net savings",
-    x = "Quarter",
-    y = "Household net savings",
-    color = "Model",
-    linetype = "Model"
+    title = "One-step-ahead holdout forecasts vs Actual (grey)",
+    x = "Quarter", y = "Household net savings"
   )
+```
+
+### Scatter Matrix of One-Step-Ahead Forecasts
+
+```{r scatter matrix, fig.width=9, fig.height=9}
+scatter_df <- tibble(
+  Persistence = as.numeric(fc_store$Persistence),
+  HW_Additive = as.numeric(fc_store$`HW Additive`),
+  ARIMA = as.numeric(fc_store[[best_arima_label]]),
+  SARIMA = as.numeric(fc_store[[best_sarima_label]]),
+  ARIMAX = as.numeric(fc_store[[best_arimax_label]]),
+  PIM = as.numeric(fc_store[[best_pim_label]])
+)
+
+pairs(scatter_df, main = "Scatter matrix: Persistence vs best ARIMA/SARIMA/ARIMAX/PIM",
+      pch = 19, col = "blue", cex = 0.6)
 ```
 
 ## Interpretation

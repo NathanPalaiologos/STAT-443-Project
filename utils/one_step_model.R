@@ -749,9 +749,16 @@ arimax_one_step_fc <- function(train, holdout, xreg_train, xreg_holdout,
     full_series <- c(train, holdout)
   }
   
-  # ARIMAX fit on training data
-  fit_train <- forecast::Arima(train, order = order, seasonal = seasonal,
-                               xreg = xreg_train_mat, include.mean = include.mean)
+  # ARIMAX fit on training data (fall back to ML if CSS hits non-stationarity)
+  fit_train <- tryCatch(
+    forecast::Arima(train, order = order, seasonal = seasonal,
+                    xreg = xreg_train_mat, include.mean = include.mean),
+    error = function(e) {
+      forecast::Arima(train, order = order, seasonal = seasonal,
+                      xreg = xreg_train_mat, include.mean = include.mean,
+                      method = "ML")
+    }
+  )
   
   # Fit trained coefficients to full series for state updates and forecasting
   fit_full <- forecast::Arima(full_series, model = fit_train, xreg = full_xreg)
