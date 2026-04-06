@@ -4,7 +4,7 @@ library(tsibble)
 dat <- read_csv("data/macro_panel_wide_raw.csv")|>
   mutate(quarterly_date = as.Date(quarterly_date)) |>
   arrange(quarterly_date)|>
-  filter(quarterly_date <= as.Date("2014-12-31")) # Filter to the desired date range
+  filter(quarterly_date <= as.Date("2019-12-31")) # Filter to the desired date range
 
 # Create variables according to Forecast Plan.md.
 # Note this is just my implementtion of the plan.
@@ -13,16 +13,8 @@ dat <- read_csv("data/macro_panel_wide_raw.csv")|>
 dat2 <- dat %>%
   arrange(quarterly_date) %>%
   mutate(
-    # saving rates (consistent with eda_df_nodiff.rds naming)
-    hh_rate   = household_net_savings / gross_domestic_income,
-    corp_rate = corporate_net_savings / gross_domestic_income,
-    
     # first differences of targets (consistent with macro_df_diff.rds naming)
     d_hh = household_net_savings - lag(household_net_savings),
-    d_corp = corporate_net_savings - lag(corporate_net_savings),
-    dhh_rate   = hh_rate - lag(hh_rate),
-    dcorp_rate = corp_rate - lag(corp_rate),
-    
     # first differences of candidate macro variables
     ldgdi      = log(gross_domestic_income) - lag(log(gross_domestic_income)),
     dunemp    = unemployment_rate - lag(unemployment_rate),
