@@ -316,6 +316,32 @@ adf.test(na.omit(dhh_ts))
 - From the above, we see that the differenced household net savings appear stationary based on the ADF test and the visual diagnostics. 
 - But they don't demonstrate strong autocorrelation, which suggests that they may be mostly driven by exogenous factors rather than strong internal dynamics.
 
+## STL Decomposition of Household Net Savings
+
+We apply STL (Seasonal and Trend decomposition using Loess) to the level `hh_save` series to separate trend, seasonal, and remainder components. This helps identify whether any quarterly seasonal pattern exists in household savings and how much of the variation is driven by irregular shocks versus systematic dynamics.
+
+```{r STL decomposition, fig.width=10, fig.height=8}
+stl_hh <- stl(hh_ts, s.window = "periodic")
+
+plot(stl_hh, main = "STL Decomposition: Household Net Savings (Level)")
+```
+
+```{r STL component magnitudes}
+stl_comp <- stl_hh$time.series
+cat("Component standard deviations:\n")
+cat("  Trend:     ", round(sd(stl_comp[, "trend"]), 1), "\n")
+cat("  Seasonal:  ", round(sd(stl_comp[, "seasonal"]), 1), "\n")
+cat("  Remainder: ", round(sd(stl_comp[, "remainder"]), 1), "\n")
+cat("\nRatio of remainder SD to total SD:", 
+    round(sd(stl_comp[, "remainder"]) / sd(hh_ts), 3), "\n")
+```
+
+**Interpretation:**
+
+- The **trend** component captures the long-run rise in household savings through the late 1980s, the sharp decline through the 1990s and 2000s, and the partial recovery post-2008. These movements align with Canadian macroeconomic cycles (oil booms, rate hikes, the 2008 crisis).
+- The **seasonal** component is modest relative to the trend and remainder; quarterly seasonality in savings is present but small. This explains why SARIMA models offer only marginal improvement over non-seasonal ARIMA.
+- The **remainder** (irregular) component dominates the short-term fluctuations. Its large variance relative to the seasonal component confirms that household savings are largely driven by unpredictable quarter-to-quarter shocks, consistent with the near-random-walk behaviour observed in the ACF analysis.
+
 ```{r Lead-lag check of household savings and macro variables}
 ccf(na.omit(eda_df$dhh), na.omit(eda_df$ldgdi),
     main = "hh savings vs log GDI")
