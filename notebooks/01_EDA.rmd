@@ -174,6 +174,68 @@ ggplot(eda_df, aes(x = date, y = hh_save)) +
     y = "Net savings"
   )
 ```
+# Addition_1:
+``` {r Quarter seasonality check for household net savings}
+eda_df <- eda_df |>
+  mutate(
+    quarter_lab = factor(quarter(date), labels = c("Q1", "Q2", "Q3", "Q4"))
+  )
+
+ggplot(eda_df, aes(x = quarter_lab, y = hh_save)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Household net savings by quarter",
+    x = "Quarter",
+    y = "Net savings"
+  )
+
+quarter_summary <- eda_df |>
+  group_by(quarter_lab) |>
+  summarise(
+    mean_hh_save = mean(hh_save, na.rm = TRUE),
+    sd_hh_save = sd(hh_save, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+kable(quarter_summary, digits = 1,
+      caption = "Quarterly summary of household net savings")
+
+```
+
+# Addition_2:
+```{r Quarterly seasonality and STL decomposition for household net savings}
+
+
+hh_ts <- ts(eda_df$hh_save, start = c(1977, 1), frequency = 4)
+
+hh_stl <- stl(hh_ts, s.window = "periodic", robust = TRUE)
+
+plot(hh_stl, main = "STL decomposition of household net savings")
+
+stl_comp <- hh_stl$time.series
+
+seasonal_strength <- max(
+  0,
+  1 - var(stl_comp[, "remainder"], na.rm = TRUE) /
+    var(stl_comp[, "seasonal"] + stl_comp[, "remainder"], na.rm = TRUE)
+)
+
+trend_strength <- max(
+  0,
+  1 - var(stl_comp[, "remainder"], na.rm = TRUE) /
+    var(stl_comp[, "trend"] + stl_comp[, "remainder"], na.rm = TRUE)
+)
+
+stl_strength_tbl <- tibble(
+  component = c("seasonal_strength", "trend_strength"),
+  value = c(seasonal_strength, trend_strength)
+)
+
+kable(stl_strength_tbl, digits = 3, caption = "STL component strength for household net savings")
+```
+The quarterly boxplot suggests only weak seasonal differences across Q1–Q4. This is consistent with the STL result, although STL extracts a periodic seasonal component, its estimated seasonal strength is essentially zero, indicating that seasonal variation is very small relative to the irregular component.
+
 ```{r auto.arima check for household net savings}
 hh_ts <- ts(eda_df$hh_save, start = c(1977, 1), frequency = 4)
 
@@ -350,6 +412,57 @@ From the above, we see the following:
 
 - Household net savings show strong contemporaneous correlation with GDI, consumption, and CPI changes, as well as some leading correlation with unemployment changes.
 - GPDI shows a clear leading relationship with household savings at lags 1–3, which motivates its use as an exogenous regressor in ARIMAX models.
+
+#Addition_3
+```{r Compare sample ACF and variance for stationary}
+compare_sample_acf_var <- function(y, lag.max = 12, split_frac = 0.5, series_name = "series") {
+  y <- as.numeric(na.omit(y))
+  
+  n_full <- length(y)
+  n_short <- floor(split_frac * n_full)
+  
+  y_short <- y[1:n_short]
+  y_full  <- y
+  
+  par(mfrow = c(2, 2))
+  plot.ts(y_short, main = paste0(series_name, ": first ", n_short, " observations"))
+  plot.ts(y_full,  main = paste0(series_name, ": full ", n_full, " observations"))
+  acf(y_short, lag.max = lag.max, main = paste0("ACF: first ", n_short))
+  acf(y_full,  lag.max = lag.max, main = paste0("ACF: full ", n_full))
+  par(mfrow = c(1, 1))
+  
+  out_tbl <- tibble(
+    sample = c(paste0("first_", n_short), paste0("full_", n_full)),
+    mean = c(mean(y_short), mean(y_full)),
+    variance = c(var(y_short), var(y_full)),
+    sd = c(sd(y_short), sd(y_full))
+  )
+  
+  kable(out_tbl, digits = 3,
+        caption = paste0(series_name, ": mean and variance comparison across sample lengths"))
+  
+  invisible(out_tbl)
+}
+
+# Level series
+level_compare_tbl <- compare_sample_acf_var(
+  hh_ts,
+  lag.max = 12,
+  split_frac = 0.5,
+  series_name = "Household net savings"
+)
+
+# Differenced series
+diff_compare_tbl <- compare_sample_acf_var(
+  dhh_ts,
+  lag.max = 12,
+  split_frac = 0.5,
+  series_name = "First difference of household net savings"
+)
+```
+Comparing the first half of the sample with the full sample shows that household net savings in levels is not stable across sample lengths. Its ACF remains large and slowly decays, which is consistent with non-stationarity. After first differencing, the series fluctuates around a more stable level and the ACF becomes much smaller, supporting the use of differencing before ARIMA-type modeling.
+
+
 
 ```{r Simple scatterplot matrix}
 pairs(
